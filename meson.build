@@ -2913,6 +2913,7 @@ common_ss = ss.source_set()
 crypto_ss = ss.source_set()
 hwcore_ss = ss.source_set()
 io_ss = ss.source_set()
+intel_pt_ss = ss.source_set()
 qmp_ss = ss.source_set()
 qom_ss = ss.source_set()
 softmmu_ss = ss.source_set()
@@ -3072,6 +3073,7 @@ subdir('crypto')
 subdir('ui')
 subdir('hw')
 subdir('gdbstub')
+subdir('intel-pt')
 
 
 if enable_modules
@@ -3094,6 +3096,7 @@ event_loop_base = declare_dependency(link_whole: event_loop_base,
 stub_ss = stub_ss.apply(config_all, strict: false)
 
 util_ss.add_all(trace_ss)
+util_ss.add_all(intel_pt_ss)
 util_ss = util_ss.apply(config_all, strict: false)
 libqemuutil = static_library('qemuutil',
                              sources: util_ss.sources() + stub_ss.sources() + genh,

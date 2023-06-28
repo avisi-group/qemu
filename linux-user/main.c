@@ -55,6 +55,7 @@
 #include "loader.h"
 #include "user-mmap.h"
 #include "accel/tcg/perf.h"
+#include "intel-pt/arguments.h"
 
 #ifdef CONFIG_SEMIHOSTING
 #include "semihosting/semihost.h"
@@ -431,6 +432,11 @@ static void handle_arg_trace(const char *arg)
     trace_opt_parse(arg);
 }
 
+static void handle_arg_intel_pt(const char *arg)
+{
+    intel_pt_opt_parse(arg);
+}
+
 #if defined(TARGET_XTENSA)
 static void handle_arg_abi_call0(const char *arg)
 {
@@ -508,6 +514,8 @@ static const struct qemu_argument arg_table[] = {
      "",           "Seed for pseudo-random number generator"},
     {"trace",      "QEMU_TRACE",       true,  handle_arg_trace,
      "",           "[[enable=]<pattern>][,events=<file>][,file=<file>]"},
+    {"intel-pt",   "QEMU_INTEL_PT",    true, handle_arg_intel_pt,
+    "",            "[[mapping=]<file>]" },
 #ifdef CONFIG_PLUGIN
     {"plugin",     "QEMU_PLUGIN",      true,  handle_arg_plugin,
      "",           "[file=]<file>[,<argname>=<argvalue>]"},
@@ -712,6 +720,7 @@ int main(int argc, char **argv, char **envp)
     cpu_model = NULL;
 
     qemu_add_opts(&qemu_trace_opts);
+    qemu_add_opts(&intel_pt_opts);
     qemu_plugin_add_opts();
 
     optind = parse_args(argc, argv);
