@@ -2,10 +2,9 @@
 
 #include "qemu/osdep.h"
 #include "qapi/error.h"
+#include "arguments.h"
 
 static FILE* mapping_file;
-
-bool ipt_record_mapping;
 
 bool init_mapping_file(const char* file_name) {
     mapping_file = fopen(file_name, "w");
@@ -14,14 +13,14 @@ bool init_mapping_file(const char* file_name) {
         return false;
     }
 
-    ipt_record_mapping = true;
+    intel_pt_config.record_mapping = true;
 
     return true;
 }
 
 
 void record_mapping(unsigned long guest_adr, unsigned long host_adr) {
-    if (!ipt_record_mapping) {
+    if (!intel_pt_config.record_mapping) {
         return;
     }
 
@@ -29,7 +28,7 @@ void record_mapping(unsigned long guest_adr, unsigned long host_adr) {
 }
 
 void close_mapping_file(void) {
-    if (!ipt_record_mapping) {
+    if (!intel_pt_config.record_mapping) {
         return;
     }
 

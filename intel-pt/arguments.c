@@ -25,6 +25,10 @@ QemuOptsList intel_pt_opts = {
     },
 };
 
+IntelPTConfig intel_pt_config = {
+    .record_mapping = true,
+};
+
 static bool intel_pt_parse_mapping_opt(QemuOpts *opts, const char* opt);
 
 
