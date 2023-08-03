@@ -515,7 +515,7 @@ static const struct qemu_argument arg_table[] = {
     {"trace",      "QEMU_TRACE",       true,  handle_arg_trace,
      "",           "[[enable=]<pattern>][,events=<file>][,file=<file>]"},
     {"intel-pt",   "QEMU_INTEL_PT",    true, handle_arg_intel_pt,
-    "",            "[[mapping=]<file>]" },
+    "",            "[mapping=<file>][,intel-pt-data=<file>][,insert-jmx=<true/false>][,use-chain-count=<true/false>]" },
 #ifdef CONFIG_PLUGIN
     {"plugin",     "QEMU_PLUGIN",      true,  handle_arg_plugin,
      "",           "[file=]<file>[,<argname>=<argvalue>]"},

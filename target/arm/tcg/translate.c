@@ -34,6 +34,7 @@
 #include "exec/helper-gen.h"
 #include "exec/log.h"
 #include "cpregs.h"
+
 #include "intel-pt/mapping.h"
 
 
@@ -9721,8 +9722,5 @@ void gen_intermediate_code(CPUState *cpu, TranslationBlock *tb, int *max_insns,
 #endif
 
     translator_loop(cpu, tb, max_insns, pc, host_pc, ops, &dc.base);
-
-    if (ipt_record_mapping) {
-        record_mapping((unsigned long)tb->pc, (unsigned long)tb->tc.ptr);
-    }
+    record_mapping((unsigned long)tb->pc, (unsigned long)tb->tc.ptr);
 }

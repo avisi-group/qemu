@@ -64,6 +64,9 @@
 #include "tcg-internal.h"
 #include "accel/tcg/perf.h"
 
+#include "intel-pt/jmx-jump.h"
+#include "intel-pt/config.h"
+
 /* Forward declarations for functions declared in tcg-target.c.inc and
    used here. */
 static void tcg_target_init(TCGContext *s);
@@ -5056,6 +5059,12 @@ int tcg_gen_code(TCGContext *s, TranslationBlock *tb, target_ulong pc_start)
 #ifdef TCG_TARGET_NEED_POOL_LABELS
     s->pool_labels = NULL;
 #endif
+
+    if (intel_pt_config.insert_jmx_at_block_start) {
+        for (unsigned int i = 0; i < jmx_machine_code_length; ++i) {
+            tcg_out8(s, jmx_machine_code[i]);
+        }
+    }
 
     num_insns = -1;
     QTAILQ_FOREACH(op, &s->ops, link) {

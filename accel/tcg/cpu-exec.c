@@ -43,7 +43,9 @@
 #include "tb-hash.h"
 #include "tb-context.h"
 #include "internal.h"
+
 #include "intel-pt/recording.h"
+#include "intel-pt/chain-count.h"
 
 /* -icount align implementation. */
 
@@ -458,6 +460,8 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
     }
 
     qemu_thread_jit_execute();
+
+    reset_chain_count();
 
     /* rjw24: ipt recording */
     ipt_start_recording();

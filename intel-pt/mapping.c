@@ -1,8 +1,8 @@
 #include "intel-pt/mapping.h"
+#include "intel-pt/config.h"
 
 #include "qemu/osdep.h"
 #include "qapi/error.h"
-#include "arguments.h"
 
 static FILE* mapping_file;
 
@@ -24,7 +24,7 @@ void record_mapping(unsigned long guest_adr, unsigned long host_adr) {
         return;
     }
 
-    fprintf(mapping_file, "%lX %lX\n", guest_adr, host_adr);
+    fprintf(mapping_file, "%lX %lX\n", guest_adr + intel_pt_config.mapping_offset, host_adr);
 }
 
 void close_mapping_file(void) {

@@ -16,8 +16,9 @@
 #include "qemu/typedefs.h"
 #include "qemu/help_option.h"
 #include "qemu/option.h"
-#include "recording.h"
-#include "recording_internal.h"
+
+#include "intel-pt/recording.h"
+#include "intel-pt/recording-internal.h"
 
 #define NR_DATA_PAGES 256
 #define NR_AUX_PAGES 1024
@@ -62,6 +63,7 @@ inline void wait_for_pt_thread(void)
 
 inline void ipt_start_recording(void)
 {
+    
 
     wait_for_pt_thread();
     ioctl(ipt_perf_fd, PERF_EVENT_IOC_ENABLE);
@@ -80,9 +82,9 @@ inline void ipt_breakpoint_call(void)
 }
 
 
-void init_ipt_recording(char* file_name)
+bool init_ipt_recording(const char* file_name)
 {
-    pthread_create(&trace_thread, NULL, trace_thread_proc, file_name);
+    pthread_create(&trace_thread, NULL, trace_thread_proc, (void* __restrict__) file_name);
 
     set_trace_thead_cpu_affinity();
 
@@ -90,6 +92,19 @@ void init_ipt_recording(char* file_name)
     { 
         /* Wait for the recording thread to start */
     }
+
+    return true;
+}
+
+
+void finish_recording_and_close_file(void)
+{
+    stop_thread = true;
+
+    while (recording_thread_started) 
+    {
+        /* Wait for recording thread to stop*/
+    }   
 }
 
 
@@ -164,7 +179,7 @@ static void *trace_thread_proc(void *arg)
     if (file_name != NULL) {
         record_pt_data_to_trace_file(file_name);
     } else {
-        fprintf(stderr, "Error saving PT data to memory for in QEMU parsing not implemented\n");
+        fprintf(stderr, "Error Cannot save PT data to memory: Reason not implemented\n");
         exit(EXIT_FAILURE);
     }
 
@@ -178,9 +193,14 @@ static void record_pt_data_to_trace_file(char* file_name)
     u64 size = header->aux_size;
     u64 last_head = 0;
 
-    recording_thread_started = 1;
-
     FILE *ipt_data_file = fopen(file_name, "w+");
+
+    if (ipt_data_file == NULL) {
+        fprintf(stderr, "Failed to open file to save intel pt data to\n");
+        exit(1);
+    }
+
+    recording_thread_started = 1;
 
     while (true)
     {
@@ -214,12 +234,14 @@ static void record_pt_data_to_trace_file(char* file_name)
             fwrite(
                 buffer + wrapped_tail,
                 size - wrapped_tail,
-                1, ipt_data_file);
+                1, ipt_data_file
+            );
 
             // from start --> head
             fwrite(
                 buffer, wrapped_head,
-                1, ipt_data_file);
+                1, ipt_data_file
+            );
         }
 
         last_head = head;
@@ -241,6 +263,10 @@ static void record_pt_data_to_trace_file(char* file_name)
 
         reading_data = 0;
     }
+
+    fclose(ipt_data_file);
+    
+    recording_thread_started = 0;
 }
 
 
