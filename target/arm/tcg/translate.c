@@ -28,6 +28,7 @@
 #include "semihosting/semihost.h"
 #include "cpregs.h"
 #include "exec/helper-proto.h"
+#include "intel-pt/mapping.h"
 
 #define HELPER_H "helper.h"
 #include "exec/helper-info.c.inc"
@@ -9706,4 +9707,8 @@ void gen_intermediate_code(CPUState *cpu, TranslationBlock *tb, int *max_insns,
 #endif
 
     translator_loop(cpu, tb, max_insns, pc, host_pc, ops, &dc.base);
+
+    if (ipt_record_mapping) {
+        record_mapping((unsigned long)tb->pc, (unsigned long)tb->tc.ptr);
+    }
 }
