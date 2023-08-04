@@ -44,6 +44,9 @@
 #include "tb-context.h"
 #include "internal.h"
 
+#include "intel-pt/recording.h"
+#include "intel-pt/chain-count.h"
+
 /* -icount align implementation. */
 
 typedef struct SyncClocks {
@@ -453,7 +456,14 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
     }
 
     qemu_thread_jit_execute();
+
+    reset_chain_count();
+
+    /* rjw24: ipt recording */
+    ipt_start_recording();
     ret = tcg_qemu_tb_exec(env, tb_ptr);
+    ipt_stop_recording();
+    
     cpu->can_do_io = 1;
     qemu_plugin_disable_mem_helpers(cpu);
     /*

@@ -3,8 +3,6 @@
 
 #include "qemu/osdep.h"
 
-extern bool ipt_record_mapping;
-
 bool init_mapping_file(const char* file_name);
 void record_mapping(unsigned long guest_adr, unsigned long host_adr);
 void close_mapping_file(void);
