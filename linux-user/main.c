@@ -743,6 +743,8 @@ int main(int argc, char **argv, char **envp)
     trace_init_file();
     qemu_plugin_load_list(&plugins, &error_fatal);
 
+    init_guest_pc_trace();
+
     /* Zero out regs */
     memset(regs, 0, sizeof(struct target_pt_regs));
 
