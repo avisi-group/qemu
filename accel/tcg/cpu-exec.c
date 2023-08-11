@@ -47,6 +47,7 @@
 
 #include "intel-pt/recording.h"
 #include "intel-pt/chain-count.h"
+#include "trace/guest_pc.h"
 
 /* -icount align implementation. */
 
@@ -431,6 +432,8 @@ const void *HELPER(lookup_tb_ptr)(CPUArchState *env)
         log_cpu_exec(pc, cpu, tb);
     }
 
+    guest_pc_trace_basic_block(pc);
+
     return tb->tc.ptr;
 }
 
@@ -455,6 +458,8 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
     if (qemu_loglevel_mask(CPU_LOG_TB_CPU | CPU_LOG_EXEC)) {
         log_cpu_exec(log_pc(cpu, itb), cpu, itb);
     }
+
+    guest_pc_trace_basic_block(itb->pc);
 
     qemu_thread_jit_execute();
 
@@ -896,7 +901,6 @@ static inline void cpu_loop_exec_tb(CPUState *cpu, TranslationBlock *tb,
 {
     int32_t insns_left;
 
-    guest_pc_trace_basic_block(pc);
     trace_exec_tb(tb, pc);
     tb = cpu_tb_exec(cpu, tb, tb_exit);
     if (*tb_exit != TB_EXIT_REQUESTED) {

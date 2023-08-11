@@ -56,6 +56,7 @@
 #include "user-mmap.h"
 #include "accel/tcg/perf.h"
 #include "intel-pt/arguments.h"
+#include "trace/guest_pc.h"
 
 #ifdef CONFIG_SEMIHOSTING
 #include "semihosting/semihost.h"
@@ -434,6 +435,11 @@ static void handle_arg_intel_pt(const char *arg)
     intel_pt_opt_parse(arg);
 }
 
+static void handle_arg_simple_trace(const char *arg)
+{
+    simple_trace_opt_parse(arg);
+}
+
 #if defined(TARGET_XTENSA)
 static void handle_arg_abi_call0(const char *arg)
 {
@@ -516,6 +522,8 @@ static const struct qemu_argument arg_table[] = {
      "",           "[[enable=]<pattern>][,events=<file>][,file=<file>]"},
     {"intel-pt",   "QEMU_INTEL_PT",    true, handle_arg_intel_pt,
     "",            "[mapping=<file>][,intel-pt-data=<file>][,insert-jmx=<true/false>][,use-chain-count=<true/false>]" },
+    {"simple-trace", "QEMU_SIMPLE_TRACE", true, handle_arg_simple_trace,
+    "file name", "outputs program trace to text file"},
 #ifdef CONFIG_PLUGIN
     {"plugin",     "QEMU_PLUGIN",      true,  handle_arg_plugin,
      "",           "[file=]<file>[,<argname>=<argvalue>]"},
@@ -743,7 +751,7 @@ int main(int argc, char **argv, char **envp)
     trace_init_file();
     qemu_plugin_load_list(&plugins, &error_fatal);
 
-    init_guest_pc_trace();
+    // init_guest_pc_trace();
 
     /* Zero out regs */
     memset(regs, 0, sizeof(struct target_pt_regs));
@@ -808,6 +816,10 @@ int main(int argc, char **argv, char **envp)
     env = cpu->env_ptr;
     cpu_reset(cpu);
     thread_cpu = cpu;
+
+    if (guest_pc_disable_direct_chaining) {
+        cpu->tcg_cflags |= CF_NO_GOTO_TB;
+    }
 
     /*
      * Reserving too much vm space via mmap can run into problems
