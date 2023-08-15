@@ -48,6 +48,7 @@ static pthread_t trace_thread = 0;
 
 static struct perf_event_mmap_page *header;
 static void *base_area, *data_area, *aux_area;
+static pid_t pid = 0;
 
 static volatile int stop_thread = 0;
 static volatile int recording_thread_started = 0;
@@ -63,16 +64,18 @@ inline void wait_for_pt_thread(void)
 
 inline void ipt_start_recording(void)
 {
-    
-
     wait_for_pt_thread();
-    ioctl(ipt_perf_fd, PERF_EVENT_IOC_ENABLE);
+    if(ioctl(ipt_perf_fd, PERF_EVENT_IOC_ENABLE) == -1) {
+        fprintf(stderr, "Failed to start perf recording reason: %s\n", strerror(errno));
+    }
 }
 
 
 inline void ipt_stop_recording(void)
 {
-    ioctl(ipt_perf_fd, PERF_EVENT_IOC_DISABLE);
+    if (ioctl(ipt_perf_fd, PERF_EVENT_IOC_DISABLE)  == -1) {
+        fprintf(stderr, "Failed to stop perf recording reason: %s\n", strerror(errno));
+    }
 }
 
 
@@ -84,14 +87,16 @@ inline void ipt_breakpoint_call(void)
 
 bool init_ipt_recording(const char* file_name)
 {
-    pthread_create(&trace_thread, NULL, trace_thread_proc, (void* __restrict__) file_name);
+    pid = getpid();
 
-    set_trace_thead_cpu_affinity();
+    pthread_create(&trace_thread, NULL, trace_thread_proc, (void* __restrict__) file_name);
 
     while (!recording_thread_started) 
     { 
         /* Wait for the recording thread to start */
     }
+
+    set_trace_thead_cpu_affinity();
 
     return true;
 }
@@ -272,7 +277,7 @@ static void record_pt_data_to_trace_file(char* file_name)
 
 static int setup_perf_fd(struct perf_event_attr* pea) 
 {
-    int fd = syscall(SYS_perf_event_open, pea, getppid(), -1, -1, 0);
+    int fd = syscall(SYS_perf_event_open, pea, pid, -1, -1, 0);
     
     if (fd < 0)
     {

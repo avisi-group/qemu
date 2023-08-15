@@ -7,9 +7,10 @@
 static FILE* mapping_file;
 
 bool init_mapping_file(const char* file_name) {
-    mapping_file = fopen(file_name, "w");
+    mapping_file = fopen(file_name, "w+");
 
     if (!mapping_file) {
+        fprintf(stderr, "Failed to create mapping file: %s, reason: %s\n", file_name, strerror(errno));
         return false;
     }
 
@@ -24,7 +25,7 @@ void record_mapping(unsigned long guest_adr, unsigned long host_adr) {
         return;
     }
 
-    fprintf(mapping_file, "%lX %lX\n", guest_adr + intel_pt_config.mapping_offset, host_adr);
+    fprintf(mapping_file, "%lX, %lX\n", guest_adr, host_adr + intel_pt_config.mapping_offset);
 }
 
 void close_mapping_file(void) {

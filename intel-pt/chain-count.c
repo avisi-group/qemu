@@ -18,7 +18,7 @@ bool init_chan_count(bool enabled)
 void init_chain_count_cpu_state(uint32_t *c_count)
 {
    chain_count = c_count;
-   *chain_count = 65;
+   *chain_count = 1000;
 }
 
 void reset_chain_count(void) 

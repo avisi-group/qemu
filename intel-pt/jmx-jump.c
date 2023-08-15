@@ -7,7 +7,7 @@ bool init_jmx_jump(bool enabled)
 
    if (enabled) {
       /* TODO update the mapping offset to resetent the jump */
-      intel_pt_config.mapping_offset = 7;
+      intel_pt_config.mapping_offset = 9;
    }
 
    return true;
