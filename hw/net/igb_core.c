@@ -2535,8 +2535,6 @@ static void igb_nsicr(IGBCore *core)
         (core->mac[IMS] && (core->mac[ICR] & E1000_ICR_INT_ASSERTED))) {
         igb_lower_interrupts(core, IMS, core->mac[IAM]);
     }
-
-    igb_update_interrupt_state(core);
 }
 
 static void igb_set_icr(IGBCore *core, int index, uint32_t val)
