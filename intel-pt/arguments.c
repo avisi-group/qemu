@@ -8,6 +8,7 @@
 #include "intel-pt/chain-count.h"
 #include "intel-pt/jmx-jump.h"
 #include "intel-pt/recording-internal.h"
+#include "intel-pt/pt-write.h"
 #include "intel-pt/config.h"
 
 #include <string.h>
@@ -35,6 +36,10 @@ QemuOptsList intel_pt_opts = {
             .name = "use-chain-count",
             .type = QEMU_OPT_BOOL
         },
+        {
+            .name = "insert-pt-write",
+            .type = QEMU_OPT_BOOL
+        },
         { /* end of list */ }
     },
 };
@@ -44,6 +49,7 @@ static bool parse_mapping_opt(QemuOpts *opts, const char* opt);
 static bool parse_intel_pt_data_opt(QemuOpts *opts, const char* opt);
 static bool parse_chain_count_opt(QemuOpts *opts, const char* opt);
 static bool parse_jmx_at_block_start_opt(QemuOpts *opts, const char* opt);
+static bool parse_pt_write_opt(QemuOpts *opts, const char* opt);
 
 #define FALSE_OPT 0
 #define TRUE_OPT 1
@@ -109,6 +115,17 @@ void intel_pt_opt_parse(const char *optarg)
         }
     }
 
+    if (qemu_opt_get(opts, "insert-pt-write")) {
+        const bool handled_insert_pt_write = parse_pt_write_opt(
+            opts, qemu_opt_get(opts, "insert-pt-write")
+        );
+
+        if (!handled_insert_pt_write) {
+            fprintf(stderr, "Failed to handle intel-pt insert-pt-write argument\n");
+            exit(1);
+        }
+    }
+
     qemu_opts_del(opts);
 }
 
@@ -165,6 +182,24 @@ static bool parse_jmx_at_block_start_opt(QemuOpts *opts, const char* opt)
         break;
     case FALSE_OPT:
         init_jmx_jump(false);
+        break;
+    case ERR_OPT:
+        fprintf(stderr, "Value must be either 'true' or 'false'\n");
+        return false;
+    }
+
+    return true;
+}
+
+static bool parse_pt_write_opt(QemuOpts *opts, const char* opt)
+{
+    switch (parse_true_false(opt))
+    {
+    case TRUE_OPT:
+        init_pt_write(true);
+        break;
+    case FALSE_OPT:
+        init_pt_write(false);
         break;
     case ERR_OPT:
         fprintf(stderr, "Value must be either 'true' or 'false'\n");

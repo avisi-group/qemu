@@ -9,6 +9,7 @@ typedef struct IntelPTConfig {
    bool record_intel_pt_data;
    bool insert_chain_count_check;
    bool insert_jmx_at_block_start;
+   bool insert_pt_write;
 } IntelPTConfig;
 
 extern IntelPTConfig intel_pt_config;

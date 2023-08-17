@@ -6156,6 +6156,16 @@ int tcg_gen_code(TCGContext *s, TranslationBlock *tb, uint64_t pc_start)
         }
     }
 
+    if (intel_pt_config.insert_pt_write) {
+        const uint8_t machine_code[15] = { 0x48, 0xB8, 0x2C, 0x85, 0x81, 0x00, 0x55, 0x00, 0x00, 0x00, 0xF3, 0x48, 0x0F, 0xAE, 0xE0 };
+
+        /* Todo: rjw24 use thje program counter here instead of current placeholder value */
+
+        for (unsigned int i = 0; i < 15; ++i) {
+            tcg_out8(s, machine_code[i]);
+        }
+    }
+
     num_insns = -1;
     QTAILQ_FOREACH(op, &s->ops, link) {
         TCGOpcode opc = op->opc;
