@@ -1,0 +1,1 @@
+intel_pt_parser_ss.add(files('parser.c'))

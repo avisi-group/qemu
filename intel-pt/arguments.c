@@ -10,6 +10,8 @@
 #include "intel-pt/recording-internal.h"
 #include "intel-pt/config.h"
 
+#include "intel-pt/parser/parser.h"
+
 #include <string.h>
 
 
@@ -54,6 +56,8 @@ static int parse_true_false(const char* opt);
 
 void intel_pt_opt_parse(const char *optarg)
 {
+    test();
+
     QemuOpts *opts = qemu_opts_parse_noisily(
         qemu_find_opts("intel-pt"), optarg, true
     );
