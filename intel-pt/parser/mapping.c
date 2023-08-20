@@ -6,7 +6,7 @@
 #include <stdlib.h>
 
 
-#define MAPPING_START_SIZE 1000
+#define MAPPING_START_SIZE 5000000
 #define SIZE_INCREASE_RATE 2
 
 typedef struct mapping_entry_t {
@@ -27,7 +27,7 @@ static mapping_t mapping = {
    .number_of_entries = 0,
 };
 
-static void increase_slot_size(void);
+// static void increase_slot_size(void);
 
 
 void init_mapping(void) 
@@ -81,24 +81,26 @@ void add_mapping(
       mapping.entries[hash].is_set = true;
       mapping.entries[hash].guest_adr = guest_adr;
       mapping.entries[hash].host_adr = host_adr;
+
+      break;
    }
 
-   if (mapping.number_of_entries >= mapping.number_of_slots * 2) {
-      increase_slot_size();
-   }  
+   // if (mapping.number_of_entries >= mapping.number_of_slots * 2) {
+   //    increase_slot_size();
+   // }  
 }
 
 
-static void increase_slot_size(void)
-{
-   mapping_entry_t *new_entries = (mapping_entry_t*) calloc(
-      mapping.number_of_slots * SIZE_INCREASE_RATE, sizeof(mapping_entry_t)
-   );
+// static void increase_slot_size(void)
+// {
+//    mapping_entry_t *new_entries = (mapping_entry_t*) calloc(
+//       mapping.number_of_slots * SIZE_INCREASE_RATE, sizeof(mapping_entry_t)
+//    );
 
-   memcpy(new_entries, mapping.entries, mapping.number_of_slots * sizeof(mapping_entry_t));
+//    memcpy(new_entries, mapping.entries, mapping.number_of_slots * sizeof(mapping_entry_t));
 
-   free(mapping.entries);
+//    free(mapping.entries);
 
-   mapping.entries = new_entries;
-   mapping.number_of_slots = mapping.number_of_slots * SIZE_INCREASE_RATE;
-}
+//    mapping.entries = new_entries;
+//    mapping.number_of_slots = mapping.number_of_slots * SIZE_INCREASE_RATE;
+// }

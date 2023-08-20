@@ -23,7 +23,7 @@ bool init_mapping_file(const char* file_name) {
 
 void record_mapping(unsigned long guest_adr, unsigned long host_adr) {
     if (intel_pt_config.give_parser_mapping) {
-        record_parser_mapping(guest_adr, host_adr);
+        record_parser_mapping(guest_adr, host_adr + intel_pt_config.mapping_offset);
     }
 
     if (!intel_pt_config.record_mapping) {
