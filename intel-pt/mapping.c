@@ -1,5 +1,6 @@
 #include "intel-pt/mapping.h"
 #include "intel-pt/config.h"
+#include "intel-pt/parser/parser.h"
 
 #include "qemu/osdep.h"
 #include "qapi/error.h"
@@ -21,6 +22,10 @@ bool init_mapping_file(const char* file_name) {
 
 
 void record_mapping(unsigned long guest_adr, unsigned long host_adr) {
+    if (intel_pt_config.give_parser_mapping) {
+        record_parser_mapping(guest_adr, host_adr);
+    }
+
     if (!intel_pt_config.record_mapping) {
         return;
     }

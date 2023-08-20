@@ -19,6 +19,7 @@
 
 #include "intel-pt/recording.h"
 #include "intel-pt/recording-internal.h"
+#include "intel-pt/parser/parser.h"
 
 #define NR_DATA_PAGES 256
 #define NR_AUX_PAGES 1024
@@ -110,6 +111,8 @@ void finish_recording_and_close_file(void)
     {
         /* Wait for recording thread to stop*/
     }   
+
+    finish_parsing_and_close_file();
 }
 
 
@@ -147,6 +150,7 @@ static void* setup_base_area(void);
 static void* setup_aux_area(void);
 
 static void record_pt_data_to_trace_file(char* file_name);
+static void record_pt_data_to_internal_memory(void);
 
 
 static void *trace_thread_proc(void *arg)
@@ -184,8 +188,7 @@ static void *trace_thread_proc(void *arg)
     if (file_name != NULL) {
         record_pt_data_to_trace_file(file_name);
     } else {
-        fprintf(stderr, "Error Cannot save PT data to memory: Reason not implemented\n");
-        exit(EXIT_FAILURE);
+        record_pt_data_to_internal_memory();
     }
 
     return NULL;
@@ -270,6 +273,77 @@ static void record_pt_data_to_trace_file(char* file_name)
     }
 
     fclose(ipt_data_file);
+    
+    recording_thread_started = 0;
+}
+
+
+static void record_pt_data_to_internal_memory(void) 
+{
+    const unsigned char *buffer = (const unsigned char *)aux_area;
+    u64 size = header->aux_size;
+    u64 last_head = 0;
+
+    recording_thread_started = 1;
+
+    while (true)
+    {
+        u64 head = READ_ONCE(header->aux_head);
+        rmb();
+
+        if (head == last_head)
+        {
+            if (stop_thread) break;
+            else continue;
+        }
+
+        reading_data = 1;
+        // fprintf(stderr, "STARTING To Read\n");
+
+        u64 wrapped_head = head % size;
+        u64 wrapped_tail = last_head % size;
+
+        if (wrapped_head > wrapped_tail)
+        {
+            // from tail --> head
+            save_intel_pt_data(
+                buffer + wrapped_tail,
+                wrapped_head - wrapped_tail
+            );
+        }
+        else
+        {
+            // from tail -> size
+            save_intel_pt_data(
+                buffer + wrapped_tail,
+                size - wrapped_tail
+            );
+
+            // from start --> head
+            save_intel_pt_data(
+                buffer, wrapped_tail
+            );
+        }
+
+        last_head = head;
+
+        // fprintf(
+        //     stderr, "WRT=%lu WRH=%lu, H=%lu D=%lu\n",
+        //     wrapped_tail, wrapped_head, head, wrapped_head > wrapped_tail ?
+        //     wrapped_head - wrapped_tail : (size - wrapped_tail) + wrapped_head
+        // );
+
+        mb();
+
+        u64 old_tail;
+
+        do
+        {
+            old_tail = __sync_val_compare_and_swap(&header->aux_tail, 0, 0);
+        } while (!__sync_bool_compare_and_swap(&header->aux_tail, old_tail, head));
+
+        reading_data = 0;
+    }
     
     recording_thread_started = 0;
 }

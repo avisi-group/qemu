@@ -37,6 +37,10 @@ QemuOptsList intel_pt_opts = {
             .name = "use-chain-count",
             .type = QEMU_OPT_BOOL
         },
+        {
+            .name = "parsed-trace",
+            .type = QEMU_OPT_STRING
+        },
         { /* end of list */ }
     },
 };
@@ -46,6 +50,7 @@ static bool parse_mapping_opt(QemuOpts *opts, const char* opt);
 static bool parse_intel_pt_data_opt(QemuOpts *opts, const char* opt);
 static bool parse_chain_count_opt(QemuOpts *opts, const char* opt);
 static bool parse_jmx_at_block_start_opt(QemuOpts *opts, const char* opt);
+static bool parse_parsed_trace_opt(QemuOpts *opts, const char* opt);
 
 #define FALSE_OPT 0
 #define TRUE_OPT 1
@@ -56,8 +61,6 @@ static int parse_true_false(const char* opt);
 
 void intel_pt_opt_parse(const char *optarg)
 {
-    test();
-
     QemuOpts *opts = qemu_opts_parse_noisily(
         qemu_find_opts("intel-pt"), optarg, true
     );
@@ -109,6 +112,18 @@ void intel_pt_opt_parse(const char *optarg)
 
         if (!handled_use_chain_count) {
             fprintf(stderr, "Failed to handle intel-pt use-chain-count argument\n");
+            exit(1);
+        }
+    }
+
+    if (qemu_opt_get(opts, "parsed-trace")) {
+        /* Note: needs to be last as it depends on previous argumnents */
+        const bool handled_parsed_tracet = parse_parsed_trace_opt(
+            opts, qemu_opt_get(opts, "parsed-trace")
+        );
+
+        if (!handled_parsed_tracet) {
+            fprintf(stderr, "Failed to handle intel-pt parsed-trace argument\n");
             exit(1);
         }
     }
@@ -174,6 +189,18 @@ static bool parse_jmx_at_block_start_opt(QemuOpts *opts, const char* opt)
         fprintf(stderr, "Value must be either 'true' or 'false'\n");
         return false;
     }
+
+    return true;
+}
+
+
+static bool parse_parsed_trace_opt(QemuOpts *opts, const char* opt)
+{
+    if(!init_internal_parsing(opt)) {
+        return false;
+    }
+
+    qemu_opt_get_del(opts, opt);
 
     return true;
 }
