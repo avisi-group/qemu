@@ -17,6 +17,7 @@
 #include "qemu/help_option.h"
 #include "qemu/option.h"
 
+#include "intel-pt/config.h"
 #include "intel-pt/recording.h"
 #include "intel-pt/recording-internal.h"
 #include "intel-pt/parser/parser.h"
@@ -66,7 +67,7 @@ inline void wait_for_pt_thread(void)
 inline void ipt_start_recording(void)
 {
     wait_for_pt_thread();
-    if(ioctl(ipt_perf_fd, PERF_EVENT_IOC_ENABLE) == -1) {
+    if(intel_pt_config.record_intel_pt_data && ioctl(ipt_perf_fd, PERF_EVENT_IOC_ENABLE) == -1) {
         fprintf(stderr, "Failed to start perf recording reason: %s\n", strerror(errno));
     }
 }
@@ -74,7 +75,7 @@ inline void ipt_start_recording(void)
 
 inline void ipt_stop_recording(void)
 {
-    if (ioctl(ipt_perf_fd, PERF_EVENT_IOC_DISABLE)  == -1) {
+    if (intel_pt_config.record_intel_pt_data && ioctl(ipt_perf_fd, PERF_EVENT_IOC_DISABLE)  == -1) {
         fprintf(stderr, "Failed to stop perf recording reason: %s\n", strerror(errno));
     }
 }

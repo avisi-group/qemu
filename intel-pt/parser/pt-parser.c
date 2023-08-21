@@ -35,7 +35,7 @@
 #define RETURN_IF_2(x, y) \
     if(x(state, packet, y)) return true
 
-#define TRACE_START_LENGTH 50000
+#define TRACE_START_LENGTH 20000
 
 static inline void advance_to_first_psb(pt_state_t *state);
 static inline bool try_get_next_packet(pt_state_t *state, pt_packet_t *packet);
