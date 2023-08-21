@@ -1,6 +1,8 @@
 #ifndef INTEL_PT__PARSER__PT_PARSER_TYPES_H_
 #define INTEL_PT__PARSER__PT_PARSER_TYPES_H_
 
+#include "intel-pt/parser/types.h"
+
 typedef enum pt_packet_type {  
     TNT,
     TIP,
@@ -63,6 +65,9 @@ typedef struct pt_state_t {
     /* The current instruction poitner (ip) value */
     unsigned long current_ip;
 
+    /* The last guest ip found */
+    unsigned long previous_guest_ip;
+
    /* Store the last TIP ip value. This is used for 
     * for generating the next value */
    unsigned long last_tip_ip;
@@ -85,6 +90,10 @@ typedef struct pt_state_t {
     * by fup packets to indicate a reset after an overflow */
    bool last_was_ovf;
 
+   /* We need to know this as intel pt may send us a
+    * fup that takes us back in time */
+   bool last_ip_had_mapping;
+
    /* Track the amount of data needing to be parced*/
    unsigned long size;
 
@@ -103,6 +112,9 @@ typedef struct pt_state_t {
 
    /* Used only when getting tip packets */
    unsigned long packet_only_last_tip_ip;
+
+   /* Used for logging the output */
+   parser_job_t *current_job;
 } pt_state_t;
 
 #endif

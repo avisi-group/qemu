@@ -6,7 +6,7 @@
 #include <stdlib.h>
 
 
-#define MAPPING_START_SIZE 5000000
+#define MAPPING_START_SIZE 50000
 #define SIZE_INCREASE_RATE 2
 
 typedef struct mapping_entry_t {
@@ -27,7 +27,8 @@ static mapping_t mapping = {
    .number_of_entries = 0,
 };
 
-// static void increase_slot_size(void);
+static inline void increase_slot_size(void);
+static inline void insert_into_mapping(mapping_t *mapping, unsigned long guest_adr, unsigned long host_adr);
 
 
 void init_mapping(void) 
@@ -70,37 +71,58 @@ unsigned long lookup_mapping(
 void add_mapping(
    unsigned long guest_adr, unsigned long host_adr
 ) {
-   for (int i = 0; i < mapping.number_of_slots; ++i) {
-      /* Using quadratic probing https://www.geeksforgeeks.org/quadratic-probing-in-hashing/ */
-      int hash = (host_adr + i * i) % mapping.number_of_slots; 
+   insert_into_mapping(&mapping, guest_adr, host_adr);
 
-      if (mapping.entries[hash].is_set) {
-         continue;
-      }
-
-      mapping.entries[hash].is_set = true;
-      mapping.entries[hash].guest_adr = guest_adr;
-      mapping.entries[hash].host_adr = host_adr;
-
-      break;
-   }
-
-   // if (mapping.number_of_entries >= mapping.number_of_slots * 2) {
-   //    increase_slot_size();
-   // }  
+   if (mapping.number_of_entries >= mapping.number_of_slots * 2) {
+      increase_slot_size();
+   }  
 }
 
 
-// static void increase_slot_size(void)
-// {
-//    mapping_entry_t *new_entries = (mapping_entry_t*) calloc(
-//       mapping.number_of_slots * SIZE_INCREASE_RATE, sizeof(mapping_entry_t)
-//    );
+static void increase_slot_size(void)
+{
+   mapping_entry_t *new_entries = (mapping_entry_t*) calloc(
+      mapping.number_of_slots * SIZE_INCREASE_RATE, sizeof(mapping_entry_t)
+   );
 
-//    memcpy(new_entries, mapping.entries, mapping.number_of_slots * sizeof(mapping_entry_t));
+   mapping_t temp_mapping = {
+      .entries = new_entries,
+      .number_of_slots = mapping.number_of_slots * SIZE_INCREASE_RATE
+   };
+   
 
-//    free(mapping.entries);
+   for (int i = 0; i < mapping.number_of_slots; ++i) {
+      if (!mapping.entries[i].is_set) {
+         continue;
+      }
 
-//    mapping.entries = new_entries;
-//    mapping.number_of_slots = mapping.number_of_slots * SIZE_INCREASE_RATE;
-// }
+      insert_into_mapping(
+         &temp_mapping, mapping.entries[i].guest_adr, mapping.entries[i].host_adr
+      );
+   }
+
+   free(mapping.entries);
+
+   mapping.entries = temp_mapping.entries;
+   mapping.number_of_slots = temp_mapping.number_of_slots;
+}
+
+
+static inline void insert_into_mapping(
+   mapping_t *mapping, unsigned long guest_adr, unsigned long host_adr
+) {
+   for (int i = 0; i < mapping->number_of_slots; ++i) {
+      /* Using quadratic probing https://www.geeksforgeeks.org/quadratic-probing-in-hashing/ */
+      int hash = (host_adr + i * i) % mapping->number_of_slots; 
+
+      if (mapping->entries[hash].is_set) {
+         continue;
+      }
+
+      mapping->entries[hash].is_set = true;
+      mapping->entries[hash].guest_adr = guest_adr;
+      mapping->entries[hash].host_adr = host_adr;
+
+      break;
+   }
+}

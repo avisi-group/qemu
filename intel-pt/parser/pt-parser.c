@@ -4,6 +4,7 @@
 #include "intel-pt/parser/pt-parser-oppcode.h"
 #include "intel-pt/parser/pt-parser-types.h"
 #include "intel-pt/parser/mapping.h"
+#include "intel-pt/parser/types.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -34,17 +35,27 @@
 #define RETURN_IF_2(x, y) \
     if(x(state, packet, y)) return true
 
+#define TRACE_START_LENGTH 50000
+
 static inline void advance_to_first_psb(pt_state_t *state);
 static inline bool try_get_next_packet(pt_state_t *state, pt_packet_t *packet);
 static inline void handle_tip(pt_state_t *state);
 static inline void update_current_ip(pt_state_t *state, unsigned long ip);
+static inline void log_basic_block(pt_state_t *state, unsigned long guest_ip);
 
 void mapping_parse(
    unsigned char* buffer, unsigned long buffer_size,
-   unsigned long start_offset, unsigned long end_offset
+   unsigned long start_offset, unsigned long end_offset,
+   parser_job_t *current_job 
 ) {
    pt_state_t state;
    pt_packet_t packet;
+
+   current_job->start_offset = start_offset;
+   current_job->end_offset = end_offset;
+   current_job->trace = calloc(TRACE_START_LENGTH, sizeof(unsigned long));
+   current_job->number_of_elements = 0;
+   current_job->trace_size = TRACE_START_LENGTH;
 
    memset(&state, 0, sizeof(pt_state_t));
    memset(&packet, 0, sizeof(pt_packet_t));
@@ -54,6 +65,7 @@ void mapping_parse(
    state.size = buffer_size;
    state.start_offset = start_offset;
    state.end_offset = end_offset;
+   state.current_job = current_job;
 
    advance_to_first_psb(&state);
 
@@ -64,7 +76,7 @@ void mapping_parse(
          state.in_psb = true;
 
          if (state.offset > state.end_offset) {
-            return;
+            break;
          }
       } else if(packet.type == PSBEND) {
          state.in_psb = false;
@@ -82,11 +94,11 @@ void mapping_parse(
       }
    }
 
-   // if(state.previous_guest_ip != 0) {
-   //    // Record the lat basic block which may have 
-   //    // not been saved yet
-   //    log_basic_block(state, state.previous_guest_ip);
-   // }
+   if(state.previous_guest_ip != 0) {
+      // Record the lat basic block which may have 
+      // not been saved yet
+      log_basic_block(&state, state.previous_guest_ip);
+   }
 }
 
 
@@ -109,8 +121,8 @@ static void advance_to_first_psb(
 static inline void handle_tip(
    pt_state_t *state
 ) {
+   bool was_in_fup = false;
    tip_packet_data *tip_data = &state->last_packet->tip_data;
-
 
    if(tip_data->type == TIP_FUP &&
          !(state->last_was_mode || state->last_was_ovf)
@@ -126,6 +138,7 @@ static inline void handle_tip(
       // We have found an a PGD packet which binds to the 
       // previous FUP packet 
       state->in_fup = false;
+      was_in_fup = true;
    }
 
 
@@ -133,6 +146,16 @@ static inline void handle_tip(
       printf_debug("  IN FUP\n");
       return;
    }
+
+   if(was_in_fup && state->last_ip_had_mapping && 
+      state->last_tip_ip == tip_data->ip && 
+      state->last_tip_ip == state->current_ip
+      ) {
+        // Want to remove the last ip from the record has we will
+        // reach it again. This may not be entierly true tbh 
+        printf_debug("  NOTE: Removing previous block from save\n");
+        state->previous_guest_ip = 0;
+    }
 
 
    if(state->current_ip == tip_data->ip && 
@@ -159,10 +182,38 @@ static inline void update_current_ip(
    unsigned long guest_ip = lookup_mapping(ip);
 
    if (guest_ip == 0) {
+      state->last_ip_had_mapping = false;
       return;
    }
 
-   printf("%lX\n", guest_ip);
+   state->last_ip_had_mapping = true;
+
+   log_basic_block(state, guest_ip);
+}
+
+
+static inline void log_basic_block(
+   pt_state_t *state, unsigned long guest_ip
+)  {
+   if(state->previous_guest_ip == 0) {
+      state->previous_guest_ip = guest_ip;
+      return;
+   } 
+
+   if (state->current_job->number_of_elements >= state->current_job->trace_size - 1) {
+      unsigned long *new_trace = calloc(state->current_job->trace_size * 2, sizeof(unsigned long));
+
+      memcpy(new_trace, state->current_job->trace, state->current_job->trace_size * sizeof(unsigned long));
+
+      free(state->current_job->trace);
+
+      state->current_job->trace = new_trace;
+      state->current_job->trace_size = state->current_job->trace_size * 2;      
+   }
+
+   state->current_job->trace[state->current_job->number_of_elements] = state->previous_guest_ip;
+   state->current_job->number_of_elements += 1;
+   state->previous_guest_ip = guest_ip;
 }
 
 
