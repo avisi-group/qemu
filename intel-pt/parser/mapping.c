@@ -6,7 +6,7 @@
 #include <stdlib.h>
 
 
-#define MAPPING_START_SIZE 50000
+#define MAPPING_START_SIZE 2000
 #define SIZE_INCREASE_RATE 2
 
 typedef struct mapping_entry_t {
@@ -48,8 +48,8 @@ unsigned long lookup_mapping(
    unsigned long host_adr
 ) {
    for (int i = 0; i < mapping.number_of_slots; ++i) {
-      /* Using quadratic probing https://www.geeksforgeeks.org/quadratic-probing-in-hashing/ */
-      int hash = (host_adr + i * i) % mapping.number_of_slots; 
+      /* Using linear probing */
+      int hash = (host_adr + i ) % mapping.number_of_slots; 
 
       if (mapping.entries[hash].host_adr == host_adr) {
          return mapping.entries[hash].guest_adr;
@@ -73,7 +73,9 @@ void add_mapping(
 ) {
    insert_into_mapping(&mapping, guest_adr, host_adr);
 
-   if (mapping.number_of_entries >= mapping.number_of_slots * 2) {
+   mapping.number_of_entries += 1;
+
+   if (mapping.number_of_entries * 2 >= mapping.number_of_slots ) {
       increase_slot_size();
    }  
 }
@@ -81,15 +83,12 @@ void add_mapping(
 
 static void increase_slot_size(void)
 {
-   mapping_entry_t *new_entries = (mapping_entry_t*) calloc(
-      mapping.number_of_slots * SIZE_INCREASE_RATE, sizeof(mapping_entry_t)
-   );
-
    mapping_t temp_mapping = {
-      .entries = new_entries,
+      .entries = calloc(
+         mapping.number_of_slots * SIZE_INCREASE_RATE, sizeof(mapping_entry_t)
+      ),
       .number_of_slots = mapping.number_of_slots * SIZE_INCREASE_RATE
    };
-   
 
    for (int i = 0; i < mapping.number_of_slots; ++i) {
       if (!mapping.entries[i].is_set) {
@@ -112,8 +111,8 @@ static inline void insert_into_mapping(
    mapping_t *mapping, unsigned long guest_adr, unsigned long host_adr
 ) {
    for (int i = 0; i < mapping->number_of_slots; ++i) {
-      /* Using quadratic probing https://www.geeksforgeeks.org/quadratic-probing-in-hashing/ */
-      int hash = (host_adr + i * i) % mapping->number_of_slots; 
+      /* Using linear probing */
+      int hash = (host_adr + i) % mapping->number_of_slots; 
 
       if (mapping->entries[hash].is_set) {
          continue;
@@ -123,6 +122,9 @@ static inline void insert_into_mapping(
       mapping->entries[hash].guest_adr = guest_adr;
       mapping->entries[hash].host_adr = host_adr;
 
-      break;
+      return;
    }
+
+   fprintf(stderr, "Fatal error in " __FILE__ " hash map ran out of space\n");
+   exit(1);
 }
