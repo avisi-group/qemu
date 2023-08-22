@@ -92,9 +92,9 @@ void finish_parsing_and_close_file(void)
 /* Current TODO:
  *    - Improve hashmap implementation to deal with resizing, will this work concurently 
  *    - Get parsing to happen concurrently, biggest problems
- *       - Getting the output to be writen to a file in order
  *       - Workers requesting new work concurrently 
  *    - Get parsing to happen before all data collected, biggest problems  
+ *       - Will want to use a circular buffer for this, but it should appear lienar to everything else 
  *       - Expanding the buffer, also want to shrink buffer when lower data has been cleaned
  *          - Can't modify the buffer whilst workers are parsing 
  *          - Could use a circular buffer that only expands when data fills up or never expands and halts QEMU when it starts getting full 

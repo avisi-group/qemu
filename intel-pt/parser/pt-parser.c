@@ -66,7 +66,7 @@ void mapping_parse(
    state.start_offset = start_offset;
    state.end_offset = end_offset;
    state.current_job = current_job;
-   state.pos_in_buffer = start_offset;
+   state.pos_in_buffer = start_offset; /* Todo: could probably remove pos_in_buffer and just use offset */
 
    advance_to_first_psb(&state);
 
