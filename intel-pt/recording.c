@@ -108,10 +108,7 @@ void finish_recording_and_close_file(void)
 {
     stop_thread = true;
 
-    while (recording_thread_started) 
-    {
-        /* Wait for recording thread to stop*/
-    }   
+    pthread_join(trace_thread, NULL);
 
     finish_parsing_and_close_file();
 }

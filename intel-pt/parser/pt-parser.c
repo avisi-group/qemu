@@ -45,14 +45,11 @@ static inline void log_basic_block(pt_state_t *state, unsigned long guest_ip);
 
 void mapping_parse(
    unsigned char* buffer, unsigned long buffer_size,
-   unsigned long start_offset, unsigned long end_offset,
    parser_job_t *current_job 
 ) {
    pt_state_t state;
    pt_packet_t packet;
 
-   current_job->start_offset = start_offset;
-   current_job->end_offset = end_offset;
    current_job->trace = calloc(TRACE_START_LENGTH, sizeof(unsigned long));
    current_job->number_of_elements = 0;
    current_job->trace_size = TRACE_START_LENGTH;
@@ -61,12 +58,12 @@ void mapping_parse(
    memset(&packet, 0, sizeof(pt_packet_t));
 
    state.buffer = buffer;
-   state.offset = start_offset;
+   state.offset = current_job->start_offset;
    state.size = buffer_size;
-   state.start_offset = start_offset;
-   state.end_offset = end_offset;
+   state.start_offset = current_job->start_offset;
+   state.end_offset = current_job->end_offset;
    state.current_job = current_job;
-   state.pos_in_buffer = start_offset; /* Todo: could probably remove pos_in_buffer and just use offset */
+   state.pos_in_buffer = current_job->start_offset; /* Todo: could probably remove pos_in_buffer and just use offset */
 
    advance_to_first_psb(&state);
 
@@ -75,12 +72,12 @@ void mapping_parse(
 
       if(packet.type == PSB) {
          state.in_psb = true;
+      } else if(packet.type == PSBEND) {
+         state.in_psb = false;
 
          if (state.offset > state.end_offset) {
             break;
          }
-      } else if(packet.type == PSBEND) {
-         state.in_psb = false;
       } else if(packet.type == TIP) {
          handle_tip(&state);
       }
@@ -151,7 +148,7 @@ static inline void handle_tip(
       state->last_tip_ip == tip_data->ip && 
       state->last_tip_ip == state->current_ip
       ) {
-        // Want to remove the last ip from the record has we will
+        // Want to remove the last ip from the record as we will
         // reach it again. This may not be entierly true tbh 
         printf_debug("  NOTE: Removing previous block from save\n");
         state->previous_guest_ip = 0;

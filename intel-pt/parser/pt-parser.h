@@ -5,7 +5,6 @@
 
 void mapping_parse(
    unsigned char* buffer, unsigned long buffer_size,
-   unsigned long start_offset, unsigned long end_offset,
    parser_job_t *current_job 
 );
 
