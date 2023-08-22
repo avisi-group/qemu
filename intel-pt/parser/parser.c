@@ -14,11 +14,11 @@
 #include <stdlib.h>
 #include <pthread.h>
 
-#define NUMBER_OF_THREADS 2
+#define NUMBER_OF_THREADS 4
 #define JOB_SIZE     65536
 #define PSB_OFFSET   4096
 
-#define BUFFER_SIZE  196608
+#define BUFFER_SIZE  1073741824
 
 static pthread_t threads[NUMBER_OF_THREADS];
 static void* worker_thread(void* args);
