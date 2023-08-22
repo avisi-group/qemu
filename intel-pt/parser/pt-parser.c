@@ -66,6 +66,7 @@ void mapping_parse(
    state.start_offset = start_offset;
    state.end_offset = end_offset;
    state.current_job = current_job;
+   state.pos_in_buffer = start_offset;
 
    advance_to_first_psb(&state);
 
@@ -95,8 +96,7 @@ void mapping_parse(
    }
 
    if(state.previous_guest_ip != 0) {
-      // Record the lat basic block which may have 
-      // not been saved yet
+      // Record the last basic block which may have not been saved yet
       log_basic_block(&state, state.previous_guest_ip);
    }
 }

@@ -6,6 +6,7 @@
 #include "intel-pt/parser/parser.h"
 #include "intel-pt/parser/mapping.h"
 #include "intel-pt/parser/pt-parser.h"
+#include "intel-pt/parser/output-writer.h"
 #include "intel-pt/parser/types.h"
 
 #include <stdio.h>
@@ -15,7 +16,6 @@ static unsigned char *temp_buffer = NULL;
 static unsigned long buffer_size = 0;
 static unsigned long pos_in_buffer = 0;
 
-static FILE* output_file = NULL;
 
 bool init_internal_parsing(
    const char *trace_file_name
@@ -36,9 +36,7 @@ bool init_internal_parsing(
 
    init_mapping();
 
-   output_file = fopen(trace_file_name, "w+");
-
-   return true;
+   return init_output_file(trace_file_name);
 }
 
 
@@ -72,16 +70,21 @@ void finish_parsing_and_close_file(void)
    }
 
    parser_job_t current_job;
+   parser_job_t current_job_2;
 
    mapping_parse(
-      temp_buffer, pos_in_buffer, 0, pos_in_buffer, &current_job
+      temp_buffer, pos_in_buffer, 0, pos_in_buffer / 2, &current_job
    );
 
-   for (int i = 0; i < current_job.number_of_elements; ++i) {
-      fprintf(output_file, "%lX\n", current_job.trace[i]);
-   }
+   mapping_parse(
+      temp_buffer, pos_in_buffer, pos_in_buffer / 2, pos_in_buffer, &current_job_2
+   );
 
-   fclose(output_file);
+   save_job_to_output_file(&current_job_2);
+   save_job_to_output_file(&current_job);
+
+
+   close_output_file();
    cleanup_mapping();  
 }
 
