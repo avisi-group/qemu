@@ -7,25 +7,21 @@
 #include "intel-pt/parser/mapping.h"
 #include "intel-pt/parser/pt-parser.h"
 #include "intel-pt/parser/output-writer.h"
+#include "intel-pt/parser/buffer.h"
 #include "intel-pt/parser/types.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
 
-#define NUMBER_OF_THREADS 6
-#define MIN_JOB_SIZE 131072
+#define NUMBER_OF_THREADS 2
+#define JOB_SIZE     65536
+#define PSB_OFFSET   4096
 
-/* Saving Variables */
-static unsigned char *temp_buffer = NULL;
-static unsigned long buffer_size = 0;
-static volatile unsigned long pos_in_buffer = 0;
+#define BUFFER_SIZE  196608
 
-/* Parsing Varaibles */
-static volatile unsigned long start_of_unparsed = 0;
-static volatile bool writing_finished = false; 
-static pthread_mutex_t job_request_lock;
-
+static pthread_t threads[NUMBER_OF_THREADS];
+static void* worker_thread(void* args);
 
 bool init_internal_parsing(
    const char *trace_file_name
@@ -41,12 +37,18 @@ bool init_internal_parsing(
    intel_pt_config.give_parser_mapping = true;
    intel_pt_config.use_internal_parsing = true;
 
-   temp_buffer = calloc(1073741824, sizeof(char));
-   buffer_size = 1073741824;
-
+   init_buffer(BUFFER_SIZE);
    init_mapping();
+   
+   if(!init_output_file(trace_file_name)) {
+      return false;
+   }
 
-   return init_output_file(trace_file_name);
+   for (int i = 0; i < NUMBER_OF_THREADS; ++i) {
+      pthread_create(&threads[i], NULL, worker_thread, NULL);
+   }
+
+   return true;
 }
 
 
@@ -57,8 +59,7 @@ void save_intel_pt_data(
       return;
    }
 
-   memcpy(temp_buffer + pos_in_buffer, buffer, size);
-   pos_in_buffer += size;
+   add_data_to_buffer(buffer, size);
 }
 
 
@@ -73,8 +74,16 @@ void record_parser_mapping(
 }
 
 
-static void* worker_thread(void* args);
-static bool get_next_job(parser_job_t *job);
+void check_intel_pt_buffer_has_space(void)
+{
+   if (!intel_pt_config.use_internal_parsing) {
+      return;
+   }
+
+   if (BUFFER_SIZE - get_buffer_length() < 65536) {
+      wait_for_buffer_to_empty();
+   }
+}
 
 
 void finish_parsing_and_close_file(void)
@@ -83,13 +92,7 @@ void finish_parsing_and_close_file(void)
       return;
    }
 
-   writing_finished = true;
-
-   pthread_t threads[NUMBER_OF_THREADS];
-
-   for (int i = 0; i < NUMBER_OF_THREADS; ++i) {
-      pthread_create(&threads[i], NULL, worker_thread, NULL);
-   }
+   signal_writing_finished();
 
    for (int i = 0; i < NUMBER_OF_THREADS; ++i) {
       pthread_join(threads[i], NULL);
@@ -97,15 +100,19 @@ void finish_parsing_and_close_file(void)
 
    close_output_file();
    cleanup_mapping();  
+   cleanup_buffer();
 }
 
 
 static void* worker_thread(void* args) 
 {
+   unsigned char *buffer = calloc(PSB_OFFSET + JOB_SIZE, sizeof(unsigned char));
+   
    parser_job_t current_job;
+   size_t buffer_size;
 
-   while(get_next_job(&current_job)) {
-      mapping_parse(temp_buffer, pos_in_buffer, &current_job);
+   while((buffer_size = get_next_job(&current_job, buffer, JOB_SIZE, PSB_OFFSET)) != 0) {
+      mapping_parse(buffer, buffer_size, &current_job);
 
       save_job_to_output_file(&current_job);
    }
@@ -114,42 +121,14 @@ static void* worker_thread(void* args)
 }
 
 
-static bool get_next_job(parser_job_t *job)
-{
-   pthread_mutex_lock(&job_request_lock);
-
-   if (writing_finished && pos_in_buffer == start_of_unparsed) {
-      pthread_mutex_unlock(&job_request_lock);
-      return false;
-   }
-
-   while (
-      start_of_unparsed - pos_in_buffer < MIN_JOB_SIZE && 
-      !writing_finished
-   ) {
-      /* Wait for data to be avaliable */
-   }
-
-   /* Data avliable get next job */
-   job->start_offset = start_of_unparsed;
-   job->end_offset = MIN(start_of_unparsed + MIN_JOB_SIZE, pos_in_buffer);
-
-   start_of_unparsed += job->end_offset - job->start_offset;
-   
-   pthread_mutex_unlock(&job_request_lock);
-
-   return true;
-}
-
-
 /* Current TODO:
- *    - Improve hashmap implementation to deal with resizing, will this work concurently 
- *    - Get parsing to happen concurrently, biggest problems
- *       - Workers requesting new work concurrently 
  *    - Get parsing to happen before all data collected, biggest problems  
  *       - Will want to use a circular buffer for this, but it should appear lienar to everything else 
  *       - Expanding the buffer, also want to shrink buffer when lower data has been cleaned
  *          - Can't modify the buffer whilst workers are parsing 
  *          - Could use a circular buffer that only expands when data fills up or never expands and halts QEMU when it starts getting full 
+ *       - If buffer starts to fill up need to pause QEMU execution 
  *       - Adding data to the buffer whilst workers are parsing 
+ *       - Create N - 2 threads at start 
+ *       - When writing to buffer finishes can spawn a further 2 threads 
  */

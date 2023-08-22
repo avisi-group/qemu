@@ -47,6 +47,7 @@
 
 #include "intel-pt/recording.h"
 #include "intel-pt/chain-count.h"
+#include "intel-pt/parser/parser.h"
 #include "trace/guest_pc.h"
 
 /* -icount align implementation. */
@@ -464,6 +465,7 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
     qemu_thread_jit_execute();
 
     reset_chain_count();
+    check_intel_pt_buffer_has_space();
 
     /* rjw24: ipt recording */
     ipt_start_recording();

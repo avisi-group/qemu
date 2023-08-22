@@ -26,6 +26,11 @@ void reset_chain_count(void)
    *chain_count = 1000;
 }
 
+void zero_chain_count(void)
+{
+   *chain_count = 0;
+}
+
 
 /* 
  * asm to decrement the chain count in the ARMCPUState

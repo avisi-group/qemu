@@ -16,6 +16,8 @@ void record_parser_mapping(
    unsigned long guest_adr, unsigned long host_adr
 );
 
+void check_intel_pt_buffer_has_space(void);
 
 void finish_parsing_and_close_file(void);
+
 #endif

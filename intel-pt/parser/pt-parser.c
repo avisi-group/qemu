@@ -44,7 +44,7 @@ static inline void update_current_ip(pt_state_t *state, unsigned long ip);
 static inline void log_basic_block(pt_state_t *state, unsigned long guest_ip);
 
 void mapping_parse(
-   unsigned char* buffer, unsigned long buffer_size,
+   unsigned char* buffer, unsigned long buffer_size, 
    parser_job_t *current_job 
 ) {
    pt_state_t state;
@@ -59,11 +59,11 @@ void mapping_parse(
 
    state.buffer = buffer;
    state.offset = current_job->start_offset;
-   state.size = buffer_size;
+   state.size = current_job->start_offset + buffer_size;
    state.start_offset = current_job->start_offset;
    state.end_offset = current_job->end_offset;
    state.current_job = current_job;
-   state.pos_in_buffer = current_job->start_offset; /* Todo: could probably remove pos_in_buffer and just use offset */
+   state.pos_in_buffer = 0;
 
    advance_to_first_psb(&state);
 
