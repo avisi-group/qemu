@@ -31,6 +31,13 @@ bool init_output_file(
 
 void close_output_file(void)
 {  
+   for (int i = 0; i < job_queue_size; ++i) {
+      if (finished_job_queue[i].is_set) {
+         fprintf(stderr, "Fatal error reached end of tracing and finnished jobs not writen to file\n");
+         exit(-1);
+      }
+   }
+
    fclose(output_file);
 }
 

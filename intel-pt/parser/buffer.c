@@ -68,6 +68,11 @@ void add_data_to_buffer(
    /* Todo may want to use zero_chain_count if buffer space starts filling up */
    pthread_mutex_lock(&write_lock);
 
+   if (amount_of_data_in_buffer + size > buffer_size) {
+      fprintf(stderr, "Fatal error intel pt buffer full\n");
+      exit(-1);
+   }
+
    size_t remaning_buffer_space = buffer_size - head_pos;
 
    if (size <= remaning_buffer_space) {
@@ -138,6 +143,8 @@ size_t get_next_job(
 
       tail_pos += amount_to_parse;
    } else {
+      printf("wrap\n");
+
       size_t tail_to_end_amount = buffer_size - tail_pos;
       size_t start_to_remaning_amount = amount_to_copy - tail_to_end_amount;
 
@@ -159,9 +166,9 @@ size_t get_next_job(
    job->start_offset = total_amount_parsed;
    job->end_offset = total_amount_parsed + amount_to_parse;
 
-   // printf("start ofst: %lu end ofst: %lu copy ofst: %lu\n", 
-   //    job->start_offset, job->end_offset, total_amount_parsed + amount_to_copy
-   // );
+   printf("start ofst: %lu end ofst: %lu copy ofst: %lu\n", 
+      job->start_offset, job->end_offset, total_amount_parsed + amount_to_copy
+   );
 
    total_amount_parsed += amount_to_parse;
    amount_of_data_in_buffer -= amount_to_parse;
