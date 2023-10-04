@@ -3334,6 +3334,7 @@ subdir('crypto')
 subdir('ui')
 subdir('hw')
 subdir('gdbstub')
+subdir('intel-pt')
 
 if enable_modules
   libmodulecommon = static_library('module-common', files('module-common.c') + genh, pic: true, c_args: '-DBUILD_DSO')
@@ -3776,9 +3777,9 @@ foreach target : target_dirs
 
   lib = static_library('qemu-' + target,
                  sources: arch_srcs + genh,
-                 dependencies: arch_deps,
+                 dependencies: arch_deps + intel_pt,
                  objects: objects,
-                 include_directories: target_inc,
+                 include_directories: target_inc + include_directories('intel-pt'),
                  c_args: c_args,
                  build_by_default: false,
                  name_suffix: 'fa')
@@ -3824,7 +3825,7 @@ foreach target : target_dirs
     emulator = executable(exe_name, exe['sources'],
                install: true,
                c_args: c_args,
-               dependencies: arch_deps + deps + exe['dependencies'],
+               dependencies: arch_deps + deps + exe['dependencies'] + intel_pt,
                objects: lib.extract_all_objects(recursive: true),
                link_depends: [block_syms, qemu_syms] + exe.get('link_depends', []),
                link_args: link_args,

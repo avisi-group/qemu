@@ -1,0 +1,13 @@
+[package]
+name = "intel_pt"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "intel_pt"
+crate-type = ["staticlib"]
+
+[dependencies]
+
+[build-dependencies]
+cbindgen = "0.26.0"
