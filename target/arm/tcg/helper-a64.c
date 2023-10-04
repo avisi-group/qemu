@@ -34,6 +34,7 @@
 #include "qemu/atomic128.h"
 #include "fpu/softfloat.h"
 #include <zlib.h> /* For crc32 */
+#include "scribe/bindings.h"
 
 /* C2.4.7 Multiply and divide */
 /* special cases for 0 and LLONG_MIN are mandated by the standard */
@@ -958,4 +959,8 @@ void HELPER(unaligned_access)(CPUARMState *env, uint64_t addr,
 {
     arm_cpu_do_unaligned_access(env_cpu(env), addr, access_type,
                                 mmu_idx, GETPC());
+}
+
+void HELPER(simple_trace)(uint64_t pc) {
+    scribe_trace_guest_pc(pc);
 }

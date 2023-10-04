@@ -24,6 +24,8 @@
 
 #include "../tcg-ldst.c.inc"
 #include "../tcg-pool.c.inc"
+#include "scribe/csrc/chain-count.h"
+#include "scribe/bindings.h"
 
 #ifdef CONFIG_DEBUG_TCG
 static const char * const tcg_target_reg_names[TCG_TARGET_NB_REGS] = {
@@ -2345,6 +2347,18 @@ static void tcg_out_exit_tb(TCGContext *s, uintptr_t a0)
 
 static void tcg_out_goto_tb(TCGContext *s, int which)
 {
+    tcg_insn_unit *patch_ptr = NULL;
+
+    if (scribe_insert_chain_count_check()) {
+        for (int i = 0; i < chain_count_machine_code_length; ++i) {
+            tcg_out8(s, chain_count_machine_code[i]);
+        }
+
+        tcg_out_opc(s, OPC_JCC_long + JCC_JE, 0, 0, 0);
+        patch_ptr = s->code_ptr;
+        tcg_out32(s, 0);
+    }
+
     /*
      * Jump displacement must be aligned for atomic patching;
      * see if we need to add extra nops before jump
@@ -2357,6 +2371,14 @@ static void tcg_out_goto_tb(TCGContext *s, int which)
     set_jmp_insn_offset(s, which);
     tcg_out32(s, 0);
     set_jmp_reset_offset(s, which);
+
+    if (scribe_insert_chain_count_check()) {
+        tcg_insn_unit *curr_ptr = s->code_ptr;
+        s->code_ptr = patch_ptr;
+        int32_t val = curr_ptr - patch_ptr;
+        tcg_out32(s, val - 4);
+        s->code_ptr = curr_ptr;
+    }
 }
 
 void tb_target_set_jmp_target(const TranslationBlock *tb, int n,

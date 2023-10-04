@@ -58,6 +58,7 @@
 #ifdef CONFIG_USER_ONLY
 #include "exec/user/guest-base.h"
 #endif
+#include "scribe/csrc/jmx-jump.h"
 
 /* Forward declarations for functions declared in tcg-target.c.inc and
    used here. */
@@ -6008,6 +6009,24 @@ int tcg_gen_code(TCGContext *s, TranslationBlock *tb, uint64_t pc_start)
     start_words = s->insn_start_words;
     s->gen_insn_data =
         tcg_malloc(sizeof(uint64_t) * s->gen_tb->icount * start_words);
+
+    if (scribe_insert_jmx_at_block_start()) {
+        for (unsigned int i = 0; i < jmx_machine_code_length; ++i) {
+            tcg_out8(s, jmx_machine_code[i]);
+        }
+    }
+
+    if (scribe_insert_pt_write()) {
+        tcg_out8(s, 0x48);
+        tcg_out8(s, 0xb8);
+        tcg_out64(s, pc_start);
+        tcg_out8(s, 0xf3);
+        tcg_out8(s, 0x48);
+        tcg_out8(s, 0x0f);
+        tcg_out8(s, 0xae);
+        tcg_out8(s, 0xe0);
+    }
+
 
     num_insns = -1;
     QTAILQ_FOREACH(op, &s->ops, link) {
