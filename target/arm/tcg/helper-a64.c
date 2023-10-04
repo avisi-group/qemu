@@ -34,6 +34,7 @@
 #include "qemu/atomic128.h"
 #include "fpu/softfloat.h"
 #include <zlib.h> /* For crc32 */
+#include "scribe/bindings.h"
 
 /* C2.4.7 Multiply and divide */
 /* special cases for 0 and LLONG_MIN are mandated by the standard */
@@ -1854,4 +1855,8 @@ void HELPER(cpyfe)(CPUARMState *env, uint32_t syndrome, uint32_t wdesc,
                    uint32_t rdesc)
 {
     do_cpye(env, syndrome, wdesc, rdesc, false, GETPC());
+}
+
+void HELPER(simple_trace)(uint64_t pc) {
+    scribe_trace_guest_pc(pc);
 }

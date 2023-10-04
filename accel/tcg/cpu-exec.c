@@ -44,6 +44,8 @@
 #include "tb-context.h"
 #include "internal-common.h"
 #include "internal-target.h"
+#include "scribe/bindings.h"
+#include "scribe/csrc/chain-count.h"
 
 /* -icount align implementation. */
 
@@ -455,7 +457,12 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
     }
 
     qemu_thread_jit_execute();
+
+    reset_chain_count();
+
+    scribe_start_recording();
     ret = tcg_qemu_tb_exec(env, tb_ptr);
+    scribe_stop_recording();
     cpu->neg.can_do_io = true;
     qemu_plugin_disable_mem_helpers(cpu);
     /*
@@ -1004,6 +1011,7 @@ cpu_exec_loop(CPUState *cpu, SyncClocks *sc)
 
                 mmap_lock();
                 tb = tb_gen_code(cpu, pc, cs_base, flags, cflags);
+                scribe_pc_mapping((uint64_t)tb->tc.ptr, pc);
                 mmap_unlock();
 
                 /*

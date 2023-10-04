@@ -3240,6 +3240,7 @@ specific_fuzz_ss = ss.source_set()
 specific_ss = ss.source_set()
 stub_ss = ss.source_set()
 trace_ss = ss.source_set()
+scribe_ss = ss.source_set()
 user_ss = ss.source_set()
 util_ss = ss.source_set()
 
@@ -3393,6 +3394,7 @@ subdir('crypto')
 subdir('ui')
 subdir('hw')
 subdir('gdbstub')
+subdir('scribe')
 
 if enable_modules
   libmodulecommon = static_library('module-common', files('module-common.c') + genh, pic: true, c_args: '-DBUILD_DSO')
@@ -3417,6 +3419,7 @@ event_loop_base = declare_dependency(link_whole: event_loop_base,
 stub_ss = stub_ss.apply(config_all, strict: false)
 
 util_ss.add_all(trace_ss)
+util_ss.add_all(scribe_ss)
 util_ss = util_ss.apply(config_all, strict: false)
 libqemuutil = static_library('qemuutil',
                              build_by_default: false,
@@ -3839,9 +3842,9 @@ foreach target : target_dirs
 
   lib = static_library('qemu-' + target,
                  sources: arch_srcs + genh,
-                 dependencies: arch_deps,
+                 dependencies: arch_deps + intel_pt,
                  objects: objects,
-                 include_directories: target_inc,
+                 include_directories: target_inc + include_directories('scribe'),
                  c_args: c_args,
                  build_by_default: false,
                  name_suffix: 'fa')
@@ -3887,7 +3890,7 @@ foreach target : target_dirs
     emulator = executable(exe_name, exe['sources'],
                install: true,
                c_args: c_args,
-               dependencies: arch_deps + deps + exe['dependencies'],
+               dependencies: arch_deps + deps + exe['dependencies'] + intel_pt,
                objects: lib.extract_all_objects(recursive: true),
                link_depends: [block_syms, qemu_syms] + exe.get('link_depends', []),
                link_args: link_args,

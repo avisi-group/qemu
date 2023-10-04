@@ -55,6 +55,7 @@
 #include "loader.h"
 #include "user-mmap.h"
 #include "accel/tcg/perf.h"
+#include "scribe/bindings.h"
 
 #ifdef CONFIG_SEMIHOSTING
 #include "semihosting/semihost.h"
@@ -508,6 +509,8 @@ static const struct qemu_argument arg_table[] = {
      "",           "Seed for pseudo-random number generator"},
     {"trace",      "QEMU_TRACE",       true,  handle_arg_trace,
      "",           "[[enable=]<pattern>][,events=<file>][,file=<file>]"},
+    {"scribe",      "QEMU_SCRIBE",       true,  handle_arg_scribe,
+     "",           "???"},
 #ifdef CONFIG_PLUGIN
     {"plugin",     "QEMU_PLUGIN",      true,  handle_arg_plugin,
      "",           "[file=]<file>[,<argname>=<argvalue>]"},
