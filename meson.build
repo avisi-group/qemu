@@ -3182,6 +3182,7 @@ specific_fuzz_ss = ss.source_set()
 specific_ss = ss.source_set()
 stub_ss = ss.source_set()
 trace_ss = ss.source_set()
+intel_pt_ss = ss.source_set()
 user_ss = ss.source_set()
 util_ss = ss.source_set()
 
@@ -3356,6 +3357,7 @@ event_loop_base = declare_dependency(link_whole: event_loop_base,
 stub_ss = stub_ss.apply(config_all, strict: false)
 
 util_ss.add_all(trace_ss)
+util_ss.add_all(intel_pt_ss)
 util_ss = util_ss.apply(config_all, strict: false)
 libqemuutil = static_library('qemuutil',
                              sources: util_ss.sources() + stub_ss.sources() + genh,

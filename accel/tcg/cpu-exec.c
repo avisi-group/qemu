@@ -429,6 +429,8 @@ const void *HELPER(lookup_tb_ptr)(CPUArchState *env)
         log_cpu_exec(pc, cpu, tb);
     }
 
+    trace_guest_pc(pc);
+
     return tb->tc.ptr;
 }
 
@@ -450,14 +452,18 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
     TranslationBlock *last_tb;
     const void *tb_ptr = itb->tc.ptr;
 
-    rust_function();
-
     if (qemu_loglevel_mask(CPU_LOG_TB_CPU | CPU_LOG_EXEC)) {
         log_cpu_exec(log_pc(cpu, itb), cpu, itb);
     }
 
+    trace_guest_pc(log_pc(cpu, itb));
+
     qemu_thread_jit_execute();
+
+    intel_pt_start_recording();
     ret = tcg_qemu_tb_exec(env, tb_ptr);
+    intel_pt_start_recording();
+
     cpu->can_do_io = 1;
     qemu_plugin_disable_mem_helpers(cpu);
     /*

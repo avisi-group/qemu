@@ -8,6 +8,15 @@ name = "intel_pt"
 crate-type = ["staticlib"]
 
 [dependencies]
+memmap2 = "0.9.0"
+once_cell = "1.18.0"
+parking_lot = "0.12.1"
+twox-hash = "1.6.3"
+page_size = "0.6.0"
+perf-event2 = "0.7.1"
+perf-event-open-sys2 = "5.0.3"
+libipt = { git = "https://github.com/sum-catnip/libipt-rs" }
+
 
 [build-dependencies]
 cbindgen = "0.26.0"

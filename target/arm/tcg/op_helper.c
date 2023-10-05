@@ -24,6 +24,7 @@
 #include "exec/exec-all.h"
 #include "exec/cpu_ldst.h"
 #include "cpregs.h"
+#include "intel-pt/intel-pt.h"
 
 #define SIGNBIT (uint32_t)0x80000000
 #define SIGNBIT64 ((uint64_t)1 << 63)
@@ -406,6 +407,7 @@ void HELPER(exception_with_syndrome_el)(CPUARMState *env, uint32_t excp,
 void HELPER(exception_with_syndrome)(CPUARMState *env, uint32_t excp,
                                      uint32_t syndrome)
 {
+    intel_pt_stop_recording();
     raise_exception(env, excp, syndrome, exception_target_el(env));
 }
 

@@ -55,6 +55,7 @@
 #include "loader.h"
 #include "user-mmap.h"
 #include "accel/tcg/perf.h"
+#include "intel-pt/intel-pt.h"
 
 #ifdef CONFIG_SEMIHOSTING
 #include "semihosting/semihost.h"
@@ -508,6 +509,8 @@ static const struct qemu_argument arg_table[] = {
      "",           "Seed for pseudo-random number generator"},
     {"trace",      "QEMU_TRACE",       true,  handle_arg_trace,
      "",           "[[enable=]<pattern>][,events=<file>][,file=<file>]"},
+    {"intel-pt",      "QEMU_INTEL_PT",       true,  handle_arg_intel_pt,
+     "",           "???"},
 #ifdef CONFIG_PLUGIN
     {"plugin",     "QEMU_PLUGIN",      true,  handle_arg_plugin,
      "",           "[file=]<file>[,<argname>=<argvalue>]"},
@@ -797,6 +800,10 @@ int main(int argc, char **argv, char **envp)
     env = cpu->env_ptr;
     cpu_reset(cpu);
     thread_cpu = cpu;
+
+    if (guest_pc_disable_direct_chaining()) {
+        cpu->tcg_cflags |= CF_NO_GOTO_TB;
+    }
 
     /*
      * Reserving too much vm space via mmap can run into problems
