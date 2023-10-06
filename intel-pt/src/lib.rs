@@ -46,13 +46,21 @@ impl State {
         if let Mode::Simple = STATE.mode() {
             false
         } else {
-            true
+            false
         }
     }
 
     /// Returns whether jmx should be inserted at the start of blocks (generates
     /// a TIP packet)
     fn insert_jmx_at_block_start(&self) -> bool {
+        if let Mode::IntelPt = STATE.mode() {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn insert_chain_count_check(&self) -> bool {
         if let Mode::IntelPt = STATE.mode() {
             true
         } else {

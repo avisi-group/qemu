@@ -43,7 +43,8 @@
 #include "tb-hash.h"
 #include "tb-context.h"
 #include "internal.h"
-#include "intel-pt.h"
+#include "intel-pt/intel-pt.h"
+#include "intel-pt/csrc/chain-count.h"
 
 /* -icount align implementation. */
 
@@ -459,6 +460,8 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
     intel_pt_trace_guest_pc(log_pc(cpu, itb));
 
     qemu_thread_jit_execute();
+
+    reset_chain_count();
 
     intel_pt_start_recording();
     ret = tcg_qemu_tb_exec(env, tb_ptr);

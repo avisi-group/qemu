@@ -29,6 +29,11 @@ pub extern "C" fn intel_pt_insert_jmx_at_block_start() -> bool {
 }
 
 #[no_mangle]
+pub extern "C" fn intel_pt_insert_chain_count_check() -> bool {
+    STATE.insert_chain_count_check()
+}
+
+#[no_mangle]
 pub extern "C" fn intel_pt_trace_guest_pc(pc: u64) {
     STATE.trace_guest_pc(pc);
 }

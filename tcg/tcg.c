@@ -59,7 +59,6 @@
 #include "exec/user/guest-base.h"
 #endif
 #include "intel-pt/csrc/jmx-jump.h"
-#include "intel-pt/intel-pt.h"
 
 /* Forward declarations for functions declared in tcg-target.c.inc and
    used here. */

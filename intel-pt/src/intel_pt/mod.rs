@@ -1,7 +1,6 @@
-use std::sync::mpsc::{Receiver, Sender};
-
 use crate::InnerState;
-
+use libipt::packet::Compression;
+use std::sync::mpsc::{Receiver, Sender};
 use {
     crate::STATE,
     libipt::{
@@ -35,7 +34,7 @@ pub struct PtTracer {
     thread_handle: JoinHandle<()>,
     /// Host to guest address mapping
     mapping: HashMap<u64, u64, BuildHasherDefault<XxHash64>>,
-    sender: Sender<()>,
+    sender: Sender<HashMap<u64, u64, BuildHasherDefault<XxHash64>>>,
 }
 
 impl PtTracer {
@@ -45,7 +44,7 @@ impl PtTracer {
 
     pub fn insert_mapping(&mut self, host_pc: u64, guest_pc: u64) {
         self.mapping.insert(host_pc, guest_pc);
-        println!("mapping {host_pc:x} {guest_pc:x}");
+        // println!("mapping {host_pc:x} {guest_pc:x}");
     }
 
     pub fn start_recording(&self) {
@@ -107,10 +106,11 @@ impl PtTracer {
         let Self {
             thread_handle,
             sender,
+            mapping,
             ..
         } = self;
 
-        drop(sender);
+        sender.send(mapping).unwrap();
         thread_handle.join().unwrap();
     }
 }
@@ -124,7 +124,10 @@ fn get_intel_pt_perf_type() -> u32 {
     buf.trim().parse().unwrap()
 }
 
-fn read_pt_data(receiver: Receiver<()>, perf_file_descriptor: i32) {
+fn read_pt_data(
+    receiver: Receiver<HashMap<u64, u64, BuildHasherDefault<XxHash64>>>,
+    perf_file_descriptor: i32,
+) {
     let mmap = memmap2::MmapOptions::new()
         .len((NR_DATA_PAGES + 1) * page_size::get())
         .map_raw(perf_file_descriptor)
@@ -143,65 +146,75 @@ fn read_pt_data(receiver: Receiver<()>, perf_file_descriptor: i32) {
 
     let mut ring_buffer = RingBuffer::new(mmap, aux_area);
 
-    let mut buf = Vec::new();
+    let mut buf = vec![];
 
-    'record_loop: loop {
-        if let Err(TryRecvError::Disconnected) = receiver.try_recv() {
-            println!("disconnected, exiting");
-            break 'record_loop;
+    let map = loop {
+        if let Ok(map) = receiver.try_recv() {
+            // println!("disconnected, exiting");
+            break map;
         }
 
         if let Some(record) = ring_buffer.next_record() {
-            let mut temp_buf = vec![0; record.data().len()];
-            record.data().copy_to_slice(&mut temp_buf);
-            buf.extend(temp_buf);
-            println!("got record");
+            let mut tmp = vec![0; record.data().len()];
+            record.data().copy_to_slice(&mut tmp);
+            buf.extend(tmp);
+            //  println!("got record len {}", record.data().len());
         }
-    }
+    };
+
+    let mut last_ip = 0;
 
     let mut decoder = PacketDecoder::new(&ConfigBuilder::new(&mut buf).unwrap().finish()).unwrap();
 
-    // keep syncing forward until successful
-    match decoder.sync_forward() {
-        Ok(_) => (),
-        Err(e) => match e.code() {
-            PtErrorCode::Eos => {
-                println!("eos");
-            }
-            _ => {
-                println!("got error while syncing: {e:?}");
-            }
-        },
-    }
+    // // keep syncing forward until successful
+    // match decoder.sync_forward() {
+    //     Ok(_) => (),
+    //     Err(e) => match e.code() {
+    //         PtErrorCode::Eos => {
+    //             println!("eos while syncing");
+    //             continue 'record_loop;
+    //         }
+    //         _ => {
+    //             println!("got error while syncing: {e:?}");
+    //         }
+    //     },
+    // }
 
     loop {
-        println!("getting next packet");
+        //println!("getting next packet");
         let p = decoder.next();
-        println!("got pkt {p:?}");
+
         match p {
             Ok(p) => match p {
                 Packet::Tip(inner) => {
-                    println!("doing lookup");
-                    let inner_ptr = unsafe { &*STATE.inner.data_ptr() };
-                    if let InnerState::IntelPt(tracer) = inner_ptr {
-                        if let Some(guest_pc) = tracer.lookup(inner.tip()) {
-                            println!("tip {:x} {:x}", inner.tip(), guest_pc);
-                        }
+                    let ip = match inner.compression() {
+                        Compression::Suppressed => todo!(),
+                        Compression::Update16 => (last_ip >> 16) << 16 | inner.tip(),
+                        Compression::Update32 => (last_ip >> 32) << 32 | inner.tip(),
+                        Compression::Update48 => (last_ip >> 32) << 32 | inner.tip(),
+                        Compression::Sext48 => (((inner.tip() as i64) << 16) >> 16) as u64,
+                        Compression::Full => inner.tip(),
+                    };
+
+                    last_ip = ip;
+
+                    if let Some(guest_pc) = map.get(&ip) {
+                        println!("{:X}", guest_pc);
                     }
                 }
-                Packet::Fup(inner) => {
-                    println!("fup {:x}", inner.fup());
+                Packet::Fup(_) => {
+                    // println!("fup {:x}", inner.fup());
                 }
                 _ => (),
             },
             Err(pkt_error) => {
-                println!("packet error {pkt_error:?}");
+                //println!("packet error {pkt_error:?}");
                 if let Err(e) = decoder.sync_forward() {
                     if e.code() == PtErrorCode::Eos {
-                        println!("got eos");
-                        return;
+                        //println!("got eos while syncing after packet error");
+                        break;
                     } else {
-                        println!("got error while syncing: {e:?}");
+                        // println!("got error while syncing: {e:?}");
                     }
                 }
             }

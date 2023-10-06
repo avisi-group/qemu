@@ -25,6 +25,7 @@
 #include "qemu/guest-random.h"
 #include "semihosting/common-semi.h"
 #include "target/arm/syndrome.h"
+#include "intel-pt/csrc/chain-count.h"
 
 #define get_user_code_u32(x, gaddr, env)                \
     ({ abi_long __r = get_user_u32((x), (gaddr));       \
@@ -77,6 +78,7 @@
 /* AArch64 main loop */
 void cpu_loop(CPUARMState *env)
 {
+    init_chain_count_cpu_state(&env->chain_count);
     CPUState *cs = env_cpu(env);
     int trapnr, ec, fsc, si_code, si_signo;
     abi_long ret;
