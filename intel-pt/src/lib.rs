@@ -1,56 +1,124 @@
+use std::time::Duration;
 use {
-    crate::mode::{get_mode, set_mode, Mode},
-    once_cell::sync::Lazy,
-    parking_lot::Mutex,
+    enum_kinds::EnumKind,
+    intel_pt::PtTracer,
+    parking_lot::{lock_api::RawMutex, Mutex},
     std::{
-        ffi::{c_char, CStr},
         fs::File,
         io::{BufWriter, Write},
+        mem,
     },
 };
 
+mod ffi;
 mod intel_pt;
-mod mode;
 
-#[no_mangle]
-pub extern "C" fn guest_pc_disable_direct_chaining() -> bool {
-    get_mode() == Mode::Simple
+static STATE: State = State::new();
+
+struct State {
+    inner: Mutex<InnerState>,
 }
 
-#[no_mangle]
-pub extern "C" fn insert_jmx_at_block_start() -> bool {
-    get_mode() == Mode::IntelPt
-}
+impl State {
+    const fn new() -> Self {
+        State {
+            inner: Mutex::const_new(RawMutex::INIT, InnerState::Uninitialized),
+        }
+    }
 
-#[no_mangle]
-pub extern "C" fn trace_guest_pc(pc: u64) {
-    static FILE: Lazy<Mutex<BufWriter<File>>> = Lazy::new(|| {
+    fn init_simple(&self) {
         let f = File::create("/tmp/ipt/simple.trace").unwrap();
-        Mutex::new(BufWriter::with_capacity(65536, f))
-    });
+        let writer = BufWriter::with_capacity(65536, f);
+        *self.inner.lock() = InnerState::Simple(writer)
+    }
 
-    if get_mode() == Mode::Simple {
-        write!(FILE.lock(), "{pc:X}\n").unwrap();
+    fn init_intelpt(&self) {
+        *self.inner.lock() = InnerState::IntelPt(PtTracer::init());
+    }
+
+    fn mode(&self) -> Mode {
+        (&*self.inner.lock()).into()
+    }
+
+    /// Returns whether direct chaining should be enabled in QEMU
+    fn enable_direct_chaining(&self) -> bool {
+        // disable direct chaining for simple mode
+        if let Mode::Simple = STATE.mode() {
+            false
+        } else {
+            true
+        }
+    }
+
+    /// Returns whether jmx should be inserted at the start of blocks (generates
+    /// a TIP packet)
+    fn insert_jmx_at_block_start(&self) -> bool {
+        if let Mode::IntelPt = STATE.mode() {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn trace_guest_pc(&self, pc: u64) {
+        let InnerState::Simple(f) = &mut *self.inner.lock() else {
+            return;
+        };
+
+        write!(f, "{pc:X}\n").unwrap();
+    }
+
+    fn insert(&self, host_pc: u64, guest_pc: u64) {
+        let InnerState::IntelPt(tracer) = &mut *self.inner.lock() else {
+            return;
+        };
+        tracer.insert_mapping(host_pc, guest_pc);
+    }
+
+    fn lookup(&self, host_pc: u64) -> Option<u64> {
+        let InnerState::IntelPt(tracer) = &mut *self.inner.lock() else {
+            return None;
+        };
+        tracer.lookup(host_pc)
+    }
+
+    fn start_recording(&self) {
+        let InnerState::IntelPt(tracer) = &mut *self.inner.lock() else {
+            return;
+        };
+
+        tracer.start_recording();
+    }
+
+    fn stop_recording(&self) {
+        let InnerState::IntelPt(tracer) = &mut *self.inner.lock() else {
+            return;
+        };
+
+        tracer.stop_recording();
+    }
+
+    fn exit(&self) {
+        match mem::take(&mut *self.inner.lock()) {
+            InnerState::Uninitialized => (),
+            InnerState::Simple(mut w) => w.flush().unwrap(),
+            InnerState::IntelPt(tracer) => tracer.exit(),
+        }
     }
 }
 
-#[no_mangle]
-pub extern "C" fn handle_arg_intel_pt(arg: *const c_char) {
-    let arg = unsafe { CStr::from_ptr(arg) }.to_str().unwrap();
-    match arg {
-        // write guest PC directly to file
-        "simple" => set_mode(mode::Mode::Simple),
-        //
-        "intelpt" => {
-            set_mode(mode::Mode::IntelPt);
-            intel_pt::init();
-        }
-        "ptwrite" => {
-            set_mode(mode::Mode::PtWrite);
-            unimplemented!()
-        }
-        _ => {
-            panic!("unrecognized intel pt argument {:?}", arg);
-        }
+#[derive(EnumKind)]
+#[enum_kind(Mode)]
+enum InnerState {
+    Uninitialized,
+    Simple(BufWriter<File>),
+    IntelPt(PtTracer),
+    //PtWrite
+    //Kernel
+}
+
+impl Default for InnerState {
+    fn default() -> Self {
+        Self::Uninitialized
     }
 }

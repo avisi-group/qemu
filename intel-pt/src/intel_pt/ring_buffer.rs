@@ -1,116 +1,102 @@
 use {
     memmap2::MmapRaw,
     perf_event_open_sys::bindings::perf_event_mmap_page,
-    std::{ptr, slice, sync::atomic::Ordering},
+    std::{
+        slice,
+        sync::atomic::{fence, AtomicU64, Ordering},
+    },
 };
 
 pub struct RingBuffer {
     mmap: MmapRaw,
     aux_area: MmapRaw,
+    last_head: usize,
 }
 
 impl RingBuffer {
     pub fn new(mmap: MmapRaw, aux_area: MmapRaw) -> Self {
-        Self { mmap, aux_area }
+        Self {
+            mmap,
+            aux_area,
+            last_head: 0,
+        }
     }
 
-    fn page(&self) -> *const perf_event_mmap_page {
-        self.mmap.as_ptr() as *const _
+    fn page(&self) -> *mut perf_event_mmap_page {
+        self.mmap.as_mut_ptr() as *mut _
     }
 
     pub fn next_record(&mut self) -> Option<Record> {
-        let page = self.page();
+        let header = self.page();
+        fence(Ordering::SeqCst);
+        let size = usize::try_from(unsafe { *header }.aux_size).unwrap();
+        let head = usize::try_from(unsafe { *header }.aux_head).unwrap();
+        fence(Ordering::SeqCst);
 
-        // SAFETY:
-        // - page points to a valid instance of perf_event_mmap_page.
-        // - data_tail is only written by the user side so it is safe to do a non-atomic
-        //   read here.
-        let tail = unsafe { ptr::read(ptr::addr_of!((*page).aux_tail)) };
-        // ATOMICS:
-        // - The acquire load here syncronizes with the release store in the kernel and
-        //   ensures that all the data written to the ring buffer before data_head is
-        //   visible to this thread.
-        // SAFETY:
-        // - page points to a valid instance of perf_event_mmap_page.
-        let head = unsafe { atomic_load(ptr::addr_of!((*page).aux_head), Ordering::Acquire) };
-
-        if tail == head {
+        if head == self.last_head {
             return None;
         }
 
-        // SAFETY: (for both statements)
-        // - page points to a valid instance of perf_event_mmap_page.
-        // - neither of these fields are written to except before the map is created so
-        //   reading from them non-atomically is safe.
-        let data_size = unsafe { ptr::read(ptr::addr_of!((*page).aux_size)) };
-        let data_offset = unsafe { ptr::read(ptr::addr_of!((*page).aux_offset)) };
+        // fprintf(stderr, "STARTING To Read\n");
 
-        let mod_tail = (tail % data_size) as usize;
-        let mod_head = (head % data_size) as usize;
+        let wrapped_head = head % size;
+        let wrapped_tail = self.last_head % size;
 
-        // SAFETY:
-        // - perf_event_open guarantees that page.data_offset is within the memory
-        //   mapping.
-        let data_start = unsafe { self.aux_area.as_ptr().add(data_offset as usize) };
-        // SAFETY:
-        // - data_start is guaranteed to be valid for at least data_size bytes.
-        let tail_start = unsafe { data_start.add(mod_tail) };
-
-        let buffer = if mod_head > mod_tail {
-            ByteBuffer::Single(unsafe { slice::from_raw_parts(tail_start, mod_head - mod_tail) })
+        let byte_buffer = if wrapped_head > wrapped_tail {
+            // from tail --> head
+            ByteBuffer::Single(unsafe {
+                slice::from_raw_parts(
+                    self.aux_area.as_mut_ptr().add(wrapped_tail),
+                    wrapped_head - wrapped_tail,
+                )
+            })
         } else {
             ByteBuffer::Split([
-                unsafe { slice::from_raw_parts(tail_start, data_size as usize - mod_tail) },
-                unsafe { slice::from_raw_parts(data_start, mod_head) },
+                unsafe {
+                    slice::from_raw_parts(
+                        self.aux_area.as_mut_ptr().add(wrapped_tail),
+                        size - wrapped_tail,
+                    )
+                },
+                unsafe { slice::from_raw_parts(self.aux_area.as_mut_ptr(), wrapped_tail) },
             ])
         };
 
-        Some(Record {
-            ring_buffer: self,
-            data: buffer,
-        })
+        self.last_head = head;
+
+        fence(Ordering::SeqCst);
+
+        let mut old_tail;
+
+        loop {
+            let aux_tail =
+                unsafe { (&((*header).aux_tail) as *const _ as *const AtomicU64).as_ref() }
+                    .unwrap();
+
+            old_tail = match aux_tail.compare_exchange(0, 0, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(val) => val,
+                Err(val) => val,
+            };
+
+            if aux_tail
+                .compare_exchange(old_tail, head as u64, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
+                break;
+            }
+        }
+
+        Some(Record { data: byte_buffer })
     }
 }
 
 pub struct Record<'rb> {
-    ring_buffer: &'rb RingBuffer,
     data: ByteBuffer<'rb>,
 }
 
 impl<'rb> Record<'rb> {
-    /// Get the total length, in bytes, of this record.
-    #[allow(clippy::len_without_is_empty)] // Records are never empty
-    pub fn len(&self) -> usize {
-        self.data.len()
-    }
-
     pub fn data(&self) -> ByteBuffer<'rb> {
         self.data
-    }
-}
-
-impl<'s> Drop for Record<'s> {
-    fn drop(&mut self) {
-        let page = self.ring_buffer.page();
-
-        unsafe {
-            // SAFETY:
-            // - page points to a valid instance of perf_event_mmap_page
-            // - data_tail is only written on our side so it is safe to do a non-atomic read
-            //   here.
-            let tail = ptr::read(ptr::addr_of!((*page).aux_tail));
-
-            // ATOMICS:
-            // - The release store here prevents the compiler from re-ordering any reads
-            //   past the store to data_tail.
-            // SAFETY:
-            // - page points to a valid instance of perf_event_mmap_page
-            atomic_store(
-                ptr::addr_of!((*page).aux_tail),
-                tail + (self.len() as u64),
-                Ordering::SeqCst,
-            );
-        }
     }
 }
 
@@ -167,65 +153,4 @@ impl<'a> ByteBuffer<'a> {
             }
         }
     }
-}
-
-macro_rules! assert_same_size {
-    ($a:ty, $b:ty) => {{
-        if false {
-            let _assert_same_size: [u8; ::std::mem::size_of::<$b>()] =
-                [0u8; ::std::mem::size_of::<$a>()];
-        }
-    }};
-}
-
-trait Atomic: Sized + Copy {
-    type Atomic;
-
-    unsafe fn store(ptr: *const Self, val: Self, order: Ordering);
-    unsafe fn load(ptr: *const Self, order: Ordering) -> Self;
-}
-
-macro_rules! impl_atomic {
-    ($base:ty, $atomic:ty) => {
-        impl Atomic for $base {
-            type Atomic = $atomic;
-
-            unsafe fn store(ptr: *const Self, val: Self, order: Ordering) {
-                assert_same_size!(Self, Self::Atomic);
-
-                let ptr = ptr as *const Self::Atomic;
-                (*ptr).store(val, order)
-            }
-
-            unsafe fn load(ptr: *const Self, order: Ordering) -> Self {
-                assert_same_size!(Self, Self::Atomic);
-
-                let ptr = ptr as *const Self::Atomic;
-                (*ptr).load(order)
-            }
-        }
-    };
-}
-
-impl_atomic!(u64, std::sync::atomic::AtomicU64);
-impl_atomic!(u32, std::sync::atomic::AtomicU32);
-impl_atomic!(u16, std::sync::atomic::AtomicU16);
-impl_atomic!(i64, std::sync::atomic::AtomicI64);
-
-/// Do an atomic write to the value stored at `ptr`.
-///
-/// # Safety
-/// - `ptr` must be valid for writes.
-/// - `ptr` must be properly aligned.
-unsafe fn atomic_store<T: Atomic>(ptr: *const T, val: T, order: Ordering) {
-    T::store(ptr, val, order)
-}
-
-/// Perform an atomic read from the value stored at `ptr`.
-///
-/// # Safety
-/// - `ptr` must be valid for reads.
-/// - `ptr` must be properly aligned.
-unsafe fn atomic_load<T: Atomic>(ptr: *const T, order: Ordering) -> T {
-    T::load(ptr, order)
 }

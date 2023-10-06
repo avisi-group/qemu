@@ -6011,7 +6011,7 @@ int tcg_gen_code(TCGContext *s, TranslationBlock *tb, uint64_t pc_start)
     s->gen_insn_data =
         tcg_malloc(sizeof(uint64_t) * s->gen_tb->icount * start_words);
 
-    if (insert_jmx_at_block_start()) {
+    if (intel_pt_insert_jmx_at_block_start()) {
         for (unsigned int i = 0; i < jmx_machine_code_length; ++i) {
             tcg_out8(s, jmx_machine_code[i]);
         }

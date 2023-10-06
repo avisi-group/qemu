@@ -801,7 +801,7 @@ int main(int argc, char **argv, char **envp)
     cpu_reset(cpu);
     thread_cpu = cpu;
 
-    if (guest_pc_disable_direct_chaining()) {
+    if (!intel_pt_enable_direct_chaining()) {
         cpu->tcg_cflags |= CF_NO_GOTO_TB;
     }
 

@@ -429,7 +429,7 @@ const void *HELPER(lookup_tb_ptr)(CPUArchState *env)
         log_cpu_exec(pc, cpu, tb);
     }
 
-    trace_guest_pc(pc);
+    intel_pt_trace_guest_pc(pc);
 
     return tb->tc.ptr;
 }
@@ -456,13 +456,13 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
         log_cpu_exec(log_pc(cpu, itb), cpu, itb);
     }
 
-    trace_guest_pc(log_pc(cpu, itb));
+    intel_pt_trace_guest_pc(log_pc(cpu, itb));
 
     qemu_thread_jit_execute();
 
     intel_pt_start_recording();
     ret = tcg_qemu_tb_exec(env, tb_ptr);
-    intel_pt_start_recording();
+    intel_pt_stop_recording();
 
     cpu->can_do_io = 1;
     qemu_plugin_disable_mem_helpers(cpu);
@@ -1012,6 +1012,7 @@ cpu_exec_loop(CPUState *cpu, SyncClocks *sc)
 
                 mmap_lock();
                 tb = tb_gen_code(cpu, pc, cs_base, flags, cflags);
+                intel_pt_insert_pc_mapping((uint64_t)tb->tc.ptr, pc);
                 mmap_unlock();
 
                 /*
