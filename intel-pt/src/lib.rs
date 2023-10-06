@@ -46,7 +46,7 @@ impl State {
         if let Mode::Simple = STATE.mode() {
             false
         } else {
-            false
+            true
         }
     }
 
@@ -61,11 +61,12 @@ impl State {
     }
 
     fn insert_chain_count_check(&self) -> bool {
-        if let Mode::IntelPt = STATE.mode() {
-            true
-        } else {
-            false
-        }
+        // if let Mode::IntelPt = STATE.mode() {
+        //     true
+        // } else {
+        //     false
+        // }
+        false
     }
 
     fn trace_guest_pc(&self, pc: u64) {

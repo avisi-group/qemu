@@ -44,7 +44,7 @@ impl PtTracer {
 
     pub fn insert_mapping(&mut self, host_pc: u64, guest_pc: u64) {
         self.mapping.insert(host_pc, guest_pc);
-        // println!("mapping {host_pc:x} {guest_pc:x}");
+        //  println!("mapping {host_pc:x} {guest_pc:x}");
     }
 
     pub fn start_recording(&self) {
@@ -198,16 +198,16 @@ fn read_pt_data(
 
                     last_ip = ip;
 
-                    if let Some(guest_pc) = map.get(&ip) {
+                    //  println!("tip {:x}", ip);
+
+                    if let Some(guest_pc) = map.get(&(ip - 9)) {
                         println!("{:X}", guest_pc);
                     }
                 }
-                Packet::Fup(_) => {
-                    // println!("fup {:x}", inner.fup());
-                }
+
                 _ => (),
             },
-            Err(pkt_error) => {
+            Err(_) => {
                 //println!("packet error {pkt_error:?}");
                 if let Err(e) = decoder.sync_forward() {
                     if e.code() == PtErrorCode::Eos {
