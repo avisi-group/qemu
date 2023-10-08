@@ -128,28 +128,18 @@ impl<'a> ByteBuffer<'a> {
     /// buffer.
     ///
     /// # Panics
-    /// Panics if `self.len() < dst.len()`
+    /// Panics if `self.len() != dst.len()`
     pub fn copy_to_slice(&mut self, dst: &mut [u8]) {
-        assert!(self.len() >= dst.len());
+        assert!(self.len() == dst.len());
 
         match self {
             Self::Single(buf) => {
-                let (head, rest) = buf.split_at(dst.len());
-                dst.copy_from_slice(head);
-                *buf = rest;
+                dst.copy_from_slice(buf);
             }
-            Self::Split([buf, _]) if buf.len() >= dst.len() => {
-                let (head, rest) = buf.split_at(dst.len());
-                dst.copy_from_slice(head);
-                *buf = rest;
-            }
-            &mut Self::Split([a, b]) => {
-                let (d_head, d_rest) = dst.split_at_mut(a.len());
-                let (b_head, b_rest) = b.split_at(d_rest.len());
 
-                d_head.copy_from_slice(a);
-                d_rest.copy_from_slice(b_head);
-                *self = Self::Single(b_rest);
+            &mut Self::Split([a, b]) => {
+                dst[..a.len()].copy_from_slice(a);
+                dst[a.len()..].copy_from_slice(b);
             }
         }
     }

@@ -5,6 +5,11 @@ use {
 
 #[no_mangle]
 pub extern "C" fn handle_arg_intel_pt(arg: *const c_char) {
+    pretty_env_logger::formatted_timed_builder()
+        .filter_level(log::LevelFilter::Trace)
+        .try_init()
+        .unwrap();
+
     let arg = unsafe { CStr::from_ptr(arg) }.to_str().unwrap();
     match arg {
         "simple" => STATE.init_simple(),

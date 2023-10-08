@@ -1,53 +1,72 @@
-use crate::InnerState;
-use libipt::packet::Compression;
-use std::sync::mpsc::{Receiver, Sender};
+use crate::intel_pt::notify::Notify;
+use parking_lot::RwLock;
+use std::{sync::Arc, time::Duration};
 use {
-    crate::STATE,
+    crate::intel_pt::ring_buffer::RingBuffer,
+    crate::{intel_pt::thread_handle::ThreadHandle, OUT_DIR, STATE},
+    bbqueue::{BBBuffer, Consumer, Producer},
     libipt::{
-        packet::{Packet, PacketDecoder},
+        packet::{Compression, Packet, PacketDecoder},
         ConfigBuilder, PtErrorCode,
     },
     perf_event_open_sys::{
         bindings::{perf_event_attr, perf_event_mmap_page},
         perf_event_open,
     },
-    ring_buffer::RingBuffer,
     std::{
         collections::HashMap,
         fs::File,
         hash::BuildHasherDefault,
-        io::Read,
+        io::{BufWriter, Read, Write},
         process,
-        sync::mpsc::{channel, TryRecvError},
+        sync::{
+            mpsc,
+            mpsc::{Receiver, Sender},
+        },
         thread::JoinHandle,
     },
     twox_hash::XxHash64,
 };
 
+mod decoder;
+mod notify;
 mod ring_buffer;
+mod thread_handle;
+
+/// Path to the value of the current Intel PT type
+const INTEL_PT_TYPE_PATH: &str = "/sys/bus/event_source/devices/intel_pt/type";
 
 const NR_AUX_PAGES: usize = 1024;
 const NR_DATA_PAGES: usize = 256;
 
+/// Number of Intel PT synchronisation points included in each work item
+const SYNC_POINTS_PER_JOB: usize = 32;
+
+/// Size of the Intel PT data buffer in bytes
+const DATA_BUFFER_SIZE: usize = 4 * 1024 * 1024 * 1024;
+
 pub struct PtTracer {
     pub perf_file_descriptor: i32,
-    thread_handle: JoinHandle<()>,
     /// Host to guest address mapping
-    mapping: HashMap<u64, u64, BuildHasherDefault<XxHash64>>,
-    sender: Sender<HashMap<u64, u64, BuildHasherDefault<XxHash64>>>,
+    mapping: Arc<RwLock<HashMap<u64, u64, BuildHasherDefault<XxHash64>>>>,
+
+    /// Handle for PT reading thread
+    read_handle: ThreadHandle,
+    /// Handle for PT parsing thread
+    parse_handle: ThreadHandle,
+    /// Handle for trace writing thread
+    write_handle: ThreadHandle,
 }
 
 impl PtTracer {
-    pub fn lookup(&self, host_pc: u64) -> Option<u64> {
-        self.mapping.get(&host_pc).copied()
-    }
-
     pub fn insert_mapping(&mut self, host_pc: u64, guest_pc: u64) {
-        self.mapping.insert(host_pc, guest_pc);
+        self.mapping.write().insert(host_pc, guest_pc);
         //  println!("mapping {host_pc:x} {guest_pc:x}");
     }
 
     pub fn start_recording(&self) {
+        self.wait_for_empty();
+
         if unsafe { perf_event_open_sys::ioctls::ENABLE(self.perf_file_descriptor, 0) } < 0 {
             panic!("failed to start recording");
         }
@@ -90,33 +109,54 @@ impl PtTracer {
             panic!("perf_event_open failed {perf_file_descriptor}");
         }
 
-        let (sender, receiver) = channel();
+        let mapping = Arc::new(RwLock::new(HashMap::default()));
+        let mapping_clone = mapping.clone();
 
-        let handle = std::thread::spawn(move || read_pt_data(receiver, perf_file_descriptor));
+        let buffer = Box::leak(Box::new(BBBuffer::new()));
+        let (producer, consumer) = buffer.try_split().unwrap();
+
+        let write_handle = ThreadHandle::spawn(move |rx| write_pt_data(rx));
+
+        let parse_handle =
+            ThreadHandle::spawn(move |rx| parse_pt_data(rx, mapping_clone, consumer));
+
+        let read_handle =
+            ThreadHandle::spawn(move |rx| read_pt_data(rx, perf_file_descriptor, producer));
 
         Self {
             perf_file_descriptor,
-            thread_handle: handle,
-            mapping: HashMap::default(),
-            sender,
+            mapping,
+
+            read_handle,
+            parse_handle,
+            write_handle,
         }
     }
 
-    pub fn exit(self) {
+    /// Waits for the internal ring buffer to be empty
+    pub fn wait_for_empty(&self) {
+        // self.pt_buffer_empty.wait();
+        // self.data_buffer_empty.wait();
+    }
+
+    pub fn terminate(self) {
+        log::trace!("terminating");
+
         let Self {
-            thread_handle,
-            sender,
-            mapping,
+            read_handle,
+            parse_handle,
+            write_handle,
             ..
         } = self;
 
-        sender.send(mapping).unwrap();
-        thread_handle.join().unwrap();
+        read_handle.terminate();
+        parse_handle.terminate();
+        write_handle.terminate();
     }
 }
 
 fn get_intel_pt_perf_type() -> u32 {
-    let mut intel_pt_type = File::open("/sys/bus/event_source/devices/intel_pt/type").unwrap();
+    let mut intel_pt_type = File::open(INTEL_PT_TYPE_PATH).unwrap();
 
     let mut buf = String::new();
     intel_pt_type.read_to_string(&mut buf).unwrap();
@@ -125,8 +165,10 @@ fn get_intel_pt_perf_type() -> u32 {
 }
 
 fn read_pt_data(
-    receiver: Receiver<HashMap<u64, u64, BuildHasherDefault<XxHash64>>>,
+    shutdown_receiver: Receiver<()>,
     perf_file_descriptor: i32,
+
+    mut producer: Producer<DATA_BUFFER_SIZE>,
 ) {
     let mmap = memmap2::MmapOptions::new()
         .len((NR_DATA_PAGES + 1) * page_size::get())
@@ -146,78 +188,135 @@ fn read_pt_data(
 
     let mut ring_buffer = RingBuffer::new(mmap, aux_area);
 
-    let mut buf = vec![];
-
-    let map = loop {
-        if let Ok(map) = receiver.try_recv() {
-            // println!("disconnected, exiting");
-            break map;
+    loop {
+        match ring_buffer.next_record() {
+            Some(record) => {
+                let mut grant = producer
+                    .grant_exact(record.data().len())
+                    .expect(&format!("failed to grant {}", record.data().len()));
+                record.data().copy_to_slice(grant.buf());
+                grant.commit(record.data().len());
+            }
+            None => {
+                if let Ok(()) = shutdown_receiver.try_recv() {
+                    log::trace!("read terminating");
+                    return;
+                }
+            }
         }
+    }
+}
 
-        if let Some(record) = ring_buffer.next_record() {
-            let mut tmp = vec![0; record.data().len()];
-            record.data().copy_to_slice(&mut tmp);
-            buf.extend(tmp);
-            //  println!("got record len {}", record.data().len());
-        }
-    };
+fn parse_pt_data(
+    shutdown_receiver: Receiver<()>,
+    mapping: Arc<RwLock<HashMap<u64, u64, BuildHasherDefault<XxHash64>>>>,
+    mut consumer: Consumer<DATA_BUFFER_SIZE>,
+) {
+    let mut writer = File::create(OUT_DIR.to_owned() + "intelpt.trace").unwrap();
 
-    let mut last_ip = 0;
-
-    let mut decoder = PacketDecoder::new(&ConfigBuilder::new(&mut buf).unwrap().finish()).unwrap();
-
-    // // keep syncing forward until successful
-    // match decoder.sync_forward() {
-    //     Ok(_) => (),
-    //     Err(e) => match e.code() {
-    //         PtErrorCode::Eos => {
-    //             println!("eos while syncing");
-    //             continue 'record_loop;
-    //         }
-    //         _ => {
-    //             println!("got error while syncing: {e:?}");
-    //         }
-    //     },
-    // }
+    std::thread::sleep(Duration::from_millis(5000));
 
     loop {
-        //println!("getting next packet");
-        let p = decoder.next();
-
-        match p {
-            Ok(p) => match p {
-                Packet::Tip(inner) => {
-                    let ip = match inner.compression() {
-                        Compression::Suppressed => todo!(),
-                        Compression::Update16 => (last_ip >> 16) << 16 | inner.tip(),
-                        Compression::Update32 => (last_ip >> 32) << 32 | inner.tip(),
-                        Compression::Update48 => (last_ip >> 32) << 32 | inner.tip(),
-                        Compression::Sext48 => (((inner.tip() as i64) << 16) >> 16) as u64,
-                        Compression::Full => inner.tip(),
-                    };
-
-                    last_ip = ip;
-
-                    //  println!("tip {:x}", ip);
-
-                    if let Some(guest_pc) = map.get(&(ip - 9)) {
-                        println!("{:X}", guest_pc);
-                    }
+        log::trace!("starting outer loop");
+        // read data from consumer, checking for shutdown if empty
+        let mut read = match consumer.read() {
+            Ok(read) => read,
+            Err(_) => {
+                if let Ok(()) = shutdown_receiver.try_recv() {
+                    log::trace!("parse terminating");
+                    return;
                 }
 
-                _ => (),
-            },
-            Err(_) => {
-                //println!("packet error {pkt_error:?}");
-                if let Err(e) = decoder.sync_forward() {
-                    if e.code() == PtErrorCode::Eos {
-                        //println!("got eos while syncing after packet error");
-                        break;
-                    } else {
-                        // println!("got error while syncing: {e:?}");
+                continue;
+            }
+        };
+
+        let mut decoder =
+            PacketDecoder::new(&ConfigBuilder::new(read.buf_mut()).unwrap().finish()).unwrap();
+
+        if decoder.sync_forward().is_err() {
+            // insufficient data in buffer to find next sync point so allow more data to be written
+
+            continue;
+        }
+
+        let mut last_ip = 0;
+        let mut pkt_count = 0;
+
+        'packet_loop: loop {
+            let p = decoder.next();
+
+            pkt_count += 1;
+
+            match p {
+                Ok(p) => match p {
+                    Packet::Tip(inner) => {
+                        let ip = match inner.compression() {
+                            Compression::Suppressed => continue,
+                            Compression::Update16 => (last_ip >> 16) << 16 | inner.tip(),
+                            Compression::Update32 => (last_ip >> 32) << 32 | inner.tip(),
+                            Compression::Update48 => (last_ip >> 32) << 32 | inner.tip(),
+                            Compression::Sext48 => (((inner.tip() as i64) << 16) >> 16) as u64,
+                            Compression::Full => inner.tip(),
+                        };
+
+                        last_ip = ip;
+
+                        //  println!("tip {:x}", ip);
+
+                        if let Some(guest_pc) = mapping.read().get(&(ip - 9)) {
+                            writeln!(writer, "{:X}", guest_pc).unwrap();
+                        }
+                    }
+                    _ => (),
+                },
+                Err(e) => {
+                    log::trace!("packet err: {e:?}");
+                    if let Err(e) = decoder.sync_forward() {
+                        if e.code() == PtErrorCode::Eos {
+                            log::trace!("packet err: got eos while syncing after packet error");
+                            break 'packet_loop;
+                        } else {
+                            log::trace!("packet err: got error while syncing {e:?}");
+                        }
                     }
                 }
             }
+        }
+
+        let offset = decoder.offset().unwrap() as usize;
+        log::trace!("finished {} packets, offset: {}", pkt_count, offset);
+
+        read.release(offset);
+
+        // loop {
+        //     //   log::trace!("offset: {:?}", offset);
+        //     if decoder.sync_forward().is_err() {
+        //         break;
+        //     }
+        //     offset = decoder.sync_offset().unwrap();
+        // }
+
+        // log::trace!("got {}", len);
+    }
+
+    // log::trace!("creating decoder {}", buf.len());
+
+    // loop {
+    //     log::trace!("offset: {:?}", decoder.sync_offset());
+    //     decoder.sync_forward().unwrap();
+    // }
+
+    // // sync forward  SYNC_POINTS_PER_JOB times,
+}
+
+fn write_pt_data(shutdown_receiver: Receiver<()>) {
+    loop {
+        if let Ok(()) = shutdown_receiver.try_recv() {
+            log::trace!("write terminating");
+            return;
+        } else {
+            std::thread::sleep(Duration::from_millis(10));
         }
     }
 }

@@ -1,4 +1,3 @@
-use std::time::Duration;
 use {
     enum_kinds::EnumKind,
     intel_pt::PtTracer,
@@ -7,11 +6,15 @@ use {
         fs::File,
         io::{BufWriter, Write},
         mem,
+        path::Path,
+        time::Duration,
     },
 };
 
 mod ffi;
 mod intel_pt;
+
+const OUT_DIR: &str = "/home/fm208/data/";
 
 static STATE: State = State::new();
 
@@ -27,7 +30,7 @@ impl State {
     }
 
     fn init_simple(&self) {
-        let f = File::create("/tmp/ipt/simple.trace").unwrap();
+        let f = File::create(OUT_DIR.to_owned() + "simple.trace").unwrap();
         let writer = BufWriter::with_capacity(65536, f);
         *self.inner.lock() = InnerState::Simple(writer)
     }
@@ -61,12 +64,11 @@ impl State {
     }
 
     fn insert_chain_count_check(&self) -> bool {
-        // if let Mode::IntelPt = STATE.mode() {
-        //     true
-        // } else {
-        //     false
-        // }
-        false
+        if let Mode::IntelPt = STATE.mode() {
+            true
+        } else {
+            false
+        }
     }
 
     fn trace_guest_pc(&self, pc: u64) {
@@ -82,13 +84,6 @@ impl State {
             return;
         };
         tracer.insert_mapping(host_pc, guest_pc);
-    }
-
-    fn lookup(&self, host_pc: u64) -> Option<u64> {
-        let InnerState::IntelPt(tracer) = &mut *self.inner.lock() else {
-            return None;
-        };
-        tracer.lookup(host_pc)
     }
 
     fn start_recording(&self) {
@@ -111,7 +106,7 @@ impl State {
         match mem::take(&mut *self.inner.lock()) {
             InnerState::Uninitialized => (),
             InnerState::Simple(mut w) => w.flush().unwrap(),
-            InnerState::IntelPt(tracer) => tracer.exit(),
+            InnerState::IntelPt(tracer) => tracer.terminate(),
         }
     }
 }

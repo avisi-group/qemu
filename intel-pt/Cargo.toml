@@ -16,6 +16,9 @@ perf-event2 = "0.7.1"
 perf-event-open-sys2 = "5.0.3"
 libipt = { git = "https://github.com/sum-catnip/libipt-rs" }
 enum-kinds = "0.5.1"
+pretty_env_logger = "0.5.0"
+log = "0.4.20"
+bbqueue = "0.5.1"
 
 
 [build-dependencies]
