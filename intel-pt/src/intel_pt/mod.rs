@@ -214,100 +214,106 @@ fn parse_pt_data(
 ) {
     let mut writer = File::create(OUT_DIR.to_owned() + "intelpt.trace").unwrap();
 
-    std::thread::sleep(Duration::from_millis(5000));
-
     loop {
-        log::trace!("starting outer loop");
         // read data from consumer, checking for shutdown if empty
         let mut read = match consumer.read() {
             Ok(read) => read,
             Err(_) => {
-                if let Ok(()) = shutdown_receiver.try_recv() {
-                    log::trace!("parse terminating");
-                    return;
-                }
-
                 continue;
             }
         };
+
+        if let Ok(()) = shutdown_receiver.try_recv() {
+            log::trace!("parse terminating");
+
+            parse_slice(&mut writer, mapping.clone(), read.buf_mut());
+
+            return;
+        }
+
+        log::trace!("read {}", read.buf().len());
 
         let mut decoder =
             PacketDecoder::new(&ConfigBuilder::new(read.buf_mut()).unwrap().finish()).unwrap();
 
         if decoder.sync_forward().is_err() {
             // insufficient data in buffer to find next sync point so allow more data to be written
-
             continue;
         }
 
-        let mut last_ip = 0;
-        let mut pkt_count = 0;
+        let (begin, end) = {
+            let offset = decoder.sync_offset().unwrap();
+            decoder.sync_set(offset + 1).unwrap();
+            if decoder.sync_forward().is_err() {
+                continue;
+            }
+            let next_offset = decoder.sync_offset().unwrap();
+            log::trace!("offsets {offset} {next_offset}");
+            (offset as usize, next_offset as usize)
+        };
 
-        'packet_loop: loop {
-            let p = decoder.next();
+        parse_slice(
+            &mut writer,
+            mapping.clone(),
+            &mut read.buf_mut()[begin..end],
+        );
 
-            pkt_count += 1;
+        let offset = decoder.offset().unwrap() as usize;
+        decoder.sync_backward().unwrap();
 
-            match p {
-                Ok(p) => match p {
-                    Packet::Tip(inner) => {
-                        let ip = match inner.compression() {
-                            Compression::Suppressed => continue,
-                            Compression::Update16 => (last_ip >> 16) << 16 | inner.tip(),
-                            Compression::Update32 => (last_ip >> 32) << 32 | inner.tip(),
-                            Compression::Update48 => (last_ip >> 32) << 32 | inner.tip(),
-                            Compression::Sext48 => (((inner.tip() as i64) << 16) >> 16) as u64,
-                            Compression::Full => inner.tip(),
-                        };
+        log::trace!(
+            "finished, offset: {}, sync_offset: {}",
+            offset,
+            decoder.sync_offset().unwrap()
+        );
 
-                        last_ip = ip;
+        read.release(end);
+    }
+}
 
-                        //  println!("tip {:x}", ip);
+fn parse_slice<W: Write>(
+    writer: &mut W,
+    mapping: Arc<RwLock<HashMap<u64, u64, BuildHasherDefault<XxHash64>>>>,
+    slice: &mut [u8],
+) {
+    let mut decoder = PacketDecoder::new(&ConfigBuilder::new(slice).unwrap().finish()).unwrap();
 
-                        if let Some(guest_pc) = mapping.read().get(&(ip - 9)) {
-                            writeln!(writer, "{:X}", guest_pc).unwrap();
-                        }
+    let mut last_ip = 0;
+
+    loop {
+        match decoder.next() {
+            Ok(p) => match p {
+                Packet::Tip(inner) => {
+                    let ip = match inner.compression() {
+                        Compression::Suppressed => continue,
+                        Compression::Update16 => (last_ip >> 16) << 16 | inner.tip(),
+                        Compression::Update32 => (last_ip >> 32) << 32 | inner.tip(),
+                        Compression::Update48 => (last_ip >> 32) << 32 | inner.tip(),
+                        Compression::Sext48 => (((inner.tip() as i64) << 16) >> 16) as u64,
+                        Compression::Full => inner.tip(),
+                    };
+
+                    last_ip = ip;
+
+                    if let Some(guest_pc) = mapping.read().get(&(ip - 9)) {
+                        writeln!(writer, "{:X}", guest_pc).unwrap();
                     }
-                    _ => (),
-                },
-                Err(e) => {
-                    log::trace!("packet err: {e:?}");
-                    if let Err(e) = decoder.sync_forward() {
-                        if e.code() == PtErrorCode::Eos {
-                            log::trace!("packet err: got eos while syncing after packet error");
-                            break 'packet_loop;
-                        } else {
-                            log::trace!("packet err: got error while syncing {e:?}");
-                        }
+                }
+                _ => (),
+            },
+            Err(e) => {
+                log::trace!("packet err: {e:?}");
+                if let Err(e) = decoder.sync_forward() {
+                    if e.code() == PtErrorCode::Eos {
+                        log::trace!("packet err: got eos while syncing after packet error");
+                        break;
+                    } else {
+                        log::trace!("packet err: got error while syncing {e:?}");
                     }
                 }
             }
         }
-
-        let offset = decoder.offset().unwrap() as usize;
-        log::trace!("finished {} packets, offset: {}", pkt_count, offset);
-
-        read.release(offset);
-
-        // loop {
-        //     //   log::trace!("offset: {:?}", offset);
-        //     if decoder.sync_forward().is_err() {
-        //         break;
-        //     }
-        //     offset = decoder.sync_offset().unwrap();
-        // }
-
-        // log::trace!("got {}", len);
     }
-
-    // log::trace!("creating decoder {}", buf.len());
-
-    // loop {
-    //     log::trace!("offset: {:?}", decoder.sync_offset());
-    //     decoder.sync_forward().unwrap();
-    // }
-
-    // // sync forward  SYNC_POINTS_PER_JOB times,
 }
 
 fn write_pt_data(shutdown_receiver: Receiver<()>) {
