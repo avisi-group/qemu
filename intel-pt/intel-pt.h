@@ -1,5 +1,7 @@
 void handle_arg_intel_pt(const char *arg);
 
+bool intel_pt_simple_tracing(void);
+
 bool intel_pt_enable_direct_chaining(void);
 
 bool intel_pt_insert_jmx_at_block_start(void);

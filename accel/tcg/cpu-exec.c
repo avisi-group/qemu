@@ -430,8 +430,6 @@ const void *HELPER(lookup_tb_ptr)(CPUArchState *env)
         log_cpu_exec(pc, cpu, tb);
     }
 
-    intel_pt_trace_guest_pc(pc);
-
     return tb->tc.ptr;
 }
 
@@ -456,8 +454,6 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
     if (qemu_loglevel_mask(CPU_LOG_TB_CPU | CPU_LOG_EXEC)) {
         log_cpu_exec(log_pc(cpu, itb), cpu, itb);
     }
-
-    intel_pt_trace_guest_pc(log_pc(cpu, itb));
 
     qemu_thread_jit_execute();
 

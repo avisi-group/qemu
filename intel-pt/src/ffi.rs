@@ -1,3 +1,5 @@
+use crate::Mode;
+
 use {
     crate::STATE,
     std::ffi::{c_char, CStr},
@@ -21,6 +23,11 @@ pub extern "C" fn handle_arg_intel_pt(arg: *const c_char) {
             panic!("unrecognized intel pt argument {:?}", arg);
         }
     }
+}
+
+#[no_mangle]
+pub extern "C" fn intel_pt_simple_tracing() -> bool {
+    STATE.mode() == Mode::Simple
 }
 
 #[no_mangle]
