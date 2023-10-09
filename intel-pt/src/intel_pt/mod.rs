@@ -1,3 +1,5 @@
+use crate::Mode;
+
 use {
     crate::{
         intel_pt::{notify::Notify, ring_buffer::RingBuffer, thread_handle::ThreadHandle},
@@ -6,7 +8,7 @@ use {
     bbqueue::{BBBuffer, Consumer, Producer},
     libipt::{
         packet::{Compression, Packet, PacketDecoder},
-        ConfigBuilder, PtError, PtErrorCode,
+        ConfigBuilder, PtErrorCode,
     },
     parking_lot::RwLock,
     perf_event_open_sys::{
@@ -17,14 +19,9 @@ use {
         collections::HashMap,
         fs::File,
         hash::BuildHasherDefault,
-        io::{BufWriter, Read, Write},
-        ops::Range,
+        io::{Read, Write},
         process,
-        sync::{
-            mpsc::{self, Receiver, Sender},
-            Arc,
-        },
-        thread::JoinHandle,
+        sync::{mpsc::Receiver, Arc},
         time::Duration,
     },
     twox_hash::XxHash64,
@@ -81,7 +78,7 @@ impl PtTracer {
         }
     }
 
-    pub fn init() -> Self {
+    pub fn init(mode: Mode) -> Self {
         let mut pea: perf_event_attr = perf_event_attr::default();
 
         // perf event type
@@ -94,7 +91,12 @@ impl PtTracer {
         pea.set_precise_ip(2);
 
         // 2401 to disable return compression
-        pea.config = 0x2001; // 0010000000000001
+
+        pea.config = if mode == Mode::PtWrite {
+            0b0011_0000_0000_0001
+        } else {
+            0x2001 // 0010000000000001
+        };
 
         pea.size = std::mem::size_of::<perf_event_attr>() as u32;
 
@@ -124,7 +126,13 @@ impl PtTracer {
         let write_handle = ThreadHandle::spawn(move |rx| write_pt_data(rx));
 
         let parse_handle = ThreadHandle::spawn(move |rx| {
-            parse_pt_data(rx, pc_map_clone, empty_buffer_notifier_clone, consumer)
+            parse_pt_data(
+                rx,
+                pc_map_clone,
+                empty_buffer_notifier_clone,
+                consumer,
+                mode,
+            )
         });
 
         let read_handle =
@@ -146,7 +154,7 @@ impl PtTracer {
         // self.empty_buffer_notifier.wait();
     }
 
-    pub fn terminate(self) {
+    pub fn exit(self) {
         log::trace!("terminating");
 
         let Self {
@@ -156,9 +164,9 @@ impl PtTracer {
             ..
         } = self;
 
-        read_handle.terminate();
-        parse_handle.terminate();
-        write_handle.terminate();
+        read_handle.exit();
+        parse_handle.exit();
+        write_handle.exit();
     }
 }
 
@@ -218,6 +226,7 @@ fn parse_pt_data(
     mapping: SharedPcMap,
     empty_buffer_notifier: Notify,
     mut consumer: Consumer<DATA_BUFFER_SIZE>,
+    mode: Mode,
 ) {
     let mut writer = File::create(OUT_DIR.to_owned() + "intelpt.trace").unwrap();
 
@@ -252,7 +261,13 @@ fn parse_pt_data(
         let len = read.buf().len();
         log::trace!("read {}", len);
 
-        match parse_single_sync(&mut writer, mapping.clone(), read.buf_mut(), &mut last_ip) {
+        match parse_single_sync(
+            &mut writer,
+            mapping.clone(),
+            read.buf_mut(),
+            &mut last_ip,
+            mode,
+        ) {
             Ok(idx) => {
                 log::trace!("finished, idx: {idx}");
                 read.release(idx);
@@ -271,6 +286,7 @@ fn parse_pt_data(
                         mapping,
                         &mut read.buf_mut()[start..],
                         &mut last_ip,
+                        mode,
                     );
                     return;
                 }
@@ -308,6 +324,7 @@ fn parse_single_sync<W: Write>(
     mapping: SharedPcMap,
     slice: &mut [u8],
     last_ip: &mut u64,
+    mode: Mode,
 ) -> Result<usize, ParseError> {
     let Some(start) = find_next_sync_point(slice) else {
         // slice did not contain any sync points
@@ -320,7 +337,7 @@ fn parse_single_sync<W: Write>(
     };
 
     log::trace!("parsing range {start}..{end}");
-    parse_slice(w, mapping, &mut slice[start..end], last_ip);
+    parse_slice(w, mapping, &mut slice[start..end], last_ip, mode);
 
     Ok(end)
 }
@@ -331,6 +348,7 @@ fn parse_slice<W: Write>(
     mapping: SharedPcMap,
     slice: &mut [u8],
     last_ip: &mut u64,
+    mode: Mode,
 ) {
     let mut decoder = PacketDecoder::new(&ConfigBuilder::new(slice).unwrap().finish()).unwrap();
     decoder.sync_forward().unwrap();
@@ -338,24 +356,43 @@ fn parse_slice<W: Write>(
 
     loop {
         match decoder.next() {
-            Ok(p) => match p {
-                Packet::Tip(inner) => {
-                    let ip = match inner.compression() {
-                        Compression::Suppressed => continue,
-                        Compression::Update16 => (*last_ip >> 16) << 16 | inner.tip(),
-                        Compression::Update32 => (*last_ip >> 32) << 32 | inner.tip(),
-                        Compression::Update48 => (*last_ip >> 32) << 32 | inner.tip(),
-                        Compression::Sext48 => (((inner.tip() as i64) << 16) >> 16) as u64,
-                        Compression::Full => inner.tip(),
-                    };
+            Ok(p) => match mode {
+                Mode::Tip => match p {
+                    Packet::Tip(inner) => {
+                        let ip = match inner.compression() {
+                            Compression::Suppressed => continue,
+                            Compression::Update16 => (*last_ip >> 16) << 16 | inner.tip(),
+                            Compression::Update32 => (*last_ip >> 32) << 32 | inner.tip(),
+                            Compression::Update48 => (*last_ip >> 32) << 32 | inner.tip(),
+                            Compression::Sext48 => (((inner.tip() as i64) << 16) >> 16) as u64,
+                            Compression::Full => inner.tip(),
+                        };
 
-                    *last_ip = ip;
+                        *last_ip = ip;
 
-                    if let Some(guest_pc) = mapping.read().get(&(ip - 9)) {
-                        writeln!(writer, "{:X}", guest_pc).unwrap();
+                        if let Some(guest_pc) = mapping.read().get(&(ip - 9)) {
+                            writeln!(writer, "{:x}", guest_pc).unwrap();
+                        }
                     }
-                }
-                _ => (),
+                    _ => (),
+                },
+                Mode::Fup => match p {
+                    Packet::Fup(inner) => {
+                        let ip = inner.fup();
+
+                        if let Some(guest_pc) = mapping.read().get(&(ip - 9)) {
+                            writeln!(writer, "{:x}", guest_pc).unwrap();
+                        }
+                    }
+                    _ => (),
+                },
+                Mode::PtWrite => match p {
+                    Packet::Ptw(inner) => {
+                        writeln!(writer, "{:x}", inner.payload()).unwrap();
+                    }
+                    _ => (),
+                },
+                _ => unreachable!(),
             },
 
             Err(e) => {

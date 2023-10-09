@@ -1,5 +1,3 @@
-use crate::Mode;
-
 use {
     crate::STATE,
     std::ffi::{c_char, CStr},
@@ -7,27 +5,12 @@ use {
 
 #[no_mangle]
 pub extern "C" fn handle_arg_intel_pt(arg: *const c_char) {
-    pretty_env_logger::formatted_timed_builder()
-        .filter_level(log::LevelFilter::Trace)
-        .try_init()
-        .unwrap();
-
-    let arg = unsafe { CStr::from_ptr(arg) }.to_str().unwrap();
-    match arg {
-        "simple" => STATE.init_simple(),
-        "intelpt" => STATE.init_intelpt(),
-        "ptwrite" => {
-            unimplemented!()
-        }
-        _ => {
-            panic!("unrecognized intel pt argument {:?}", arg);
-        }
-    }
+    STATE.handle_arg(unsafe { CStr::from_ptr(arg) }.to_str().unwrap());
 }
 
 #[no_mangle]
 pub extern "C" fn intel_pt_simple_tracing() -> bool {
-    STATE.mode() == Mode::Simple
+    STATE.enable_simple_tracing()
 }
 
 #[no_mangle]
@@ -41,6 +24,11 @@ pub extern "C" fn intel_pt_insert_jmx_at_block_start() -> bool {
 }
 
 #[no_mangle]
+pub extern "C" fn intel_pt_insert_pt_write() -> bool {
+    STATE.insert_pt_write()
+}
+
+#[no_mangle]
 pub extern "C" fn intel_pt_insert_chain_count_check() -> bool {
     STATE.insert_chain_count_check()
 }
@@ -51,8 +39,8 @@ pub extern "C" fn intel_pt_trace_guest_pc(pc: u64) {
 }
 
 #[no_mangle]
-pub extern "C" fn intel_pt_insert_pc_mapping(host_pc: u64, guest_pc: u64) {
-    STATE.insert(host_pc, guest_pc);
+pub extern "C" fn intel_pt_pc_mapping(host_pc: u64, guest_pc: u64) {
+    STATE.pc_mapping(host_pc, guest_pc);
 }
 
 #[no_mangle]

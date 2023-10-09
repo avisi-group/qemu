@@ -1011,7 +1011,7 @@ cpu_exec_loop(CPUState *cpu, SyncClocks *sc)
 
                 mmap_lock();
                 tb = tb_gen_code(cpu, pc, cs_base, flags, cflags);
-                intel_pt_insert_pc_mapping((uint64_t)tb->tc.ptr, pc);
+                intel_pt_pc_mapping((uint64_t)tb->tc.ptr, pc);
                 mmap_unlock();
 
                 /*

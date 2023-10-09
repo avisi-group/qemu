@@ -18,7 +18,7 @@ impl ThreadHandle {
         }
     }
 
-    pub fn terminate(self) {
+    pub fn exit(self) {
         log::trace!("sending shutdown");
         self.shutdown_sender.send(()).unwrap();
         log::trace!("waiting on join");
