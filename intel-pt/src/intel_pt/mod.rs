@@ -1,14 +1,14 @@
-use crate::intel_pt::notify::Notify;
-use parking_lot::RwLock;
-use std::{sync::Arc, time::Duration};
 use {
-    crate::intel_pt::ring_buffer::RingBuffer,
-    crate::{intel_pt::thread_handle::ThreadHandle, OUT_DIR, STATE},
+    crate::{
+        intel_pt::{notify::Notify, ring_buffer::RingBuffer, thread_handle::ThreadHandle},
+        OUT_DIR,
+    },
     bbqueue::{BBBuffer, Consumer, Producer},
     libipt::{
         packet::{Compression, Packet, PacketDecoder},
-        ConfigBuilder, PtErrorCode,
+        ConfigBuilder, PtError, PtErrorCode,
     },
+    parking_lot::RwLock,
     perf_event_open_sys::{
         bindings::{perf_event_attr, perf_event_mmap_page},
         perf_event_open,
@@ -18,12 +18,14 @@ use {
         fs::File,
         hash::BuildHasherDefault,
         io::{BufWriter, Read, Write},
+        ops::Range,
         process,
         sync::{
-            mpsc,
-            mpsc::{Receiver, Sender},
+            mpsc::{self, Receiver, Sender},
+            Arc,
         },
         thread::JoinHandle,
+        time::Duration,
     },
     twox_hash::XxHash64,
 };
@@ -32,6 +34,8 @@ mod decoder;
 mod notify;
 mod ring_buffer;
 mod thread_handle;
+
+type SharedPcMap = Arc<RwLock<HashMap<u64, u64, BuildHasherDefault<XxHash64>>>>;
 
 /// Path to the value of the current Intel PT type
 const INTEL_PT_TYPE_PATH: &str = "/sys/bus/event_source/devices/intel_pt/type";
@@ -48,8 +52,8 @@ const DATA_BUFFER_SIZE: usize = 4 * 1024 * 1024 * 1024;
 pub struct PtTracer {
     pub perf_file_descriptor: i32,
     /// Host to guest address mapping
-    mapping: Arc<RwLock<HashMap<u64, u64, BuildHasherDefault<XxHash64>>>>,
-
+    pc_map: SharedPcMap,
+    empty_buffer_notifier: Notify,
     /// Handle for PT reading thread
     read_handle: ThreadHandle,
     /// Handle for PT parsing thread
@@ -60,8 +64,7 @@ pub struct PtTracer {
 
 impl PtTracer {
     pub fn insert_mapping(&mut self, host_pc: u64, guest_pc: u64) {
-        self.mapping.write().insert(host_pc, guest_pc);
-        //  println!("mapping {host_pc:x} {guest_pc:x}");
+        self.pc_map.write().insert(host_pc, guest_pc);
     }
 
     pub fn start_recording(&self) {
@@ -109,24 +112,28 @@ impl PtTracer {
             panic!("perf_event_open failed {perf_file_descriptor}");
         }
 
-        let mapping = Arc::new(RwLock::new(HashMap::default()));
-        let mapping_clone = mapping.clone();
+        let pc_map = Arc::new(RwLock::new(HashMap::default()));
+        let pc_map_clone = pc_map.clone();
 
         let buffer = Box::leak(Box::new(BBBuffer::new()));
         let (producer, consumer) = buffer.try_split().unwrap();
 
+        let empty_buffer_notifier = Notify::new();
+        let empty_buffer_notifier_clone = empty_buffer_notifier.clone();
+
         let write_handle = ThreadHandle::spawn(move |rx| write_pt_data(rx));
 
-        let parse_handle =
-            ThreadHandle::spawn(move |rx| parse_pt_data(rx, mapping_clone, consumer));
+        let parse_handle = ThreadHandle::spawn(move |rx| {
+            parse_pt_data(rx, pc_map_clone, empty_buffer_notifier_clone, consumer)
+        });
 
         let read_handle =
             ThreadHandle::spawn(move |rx| read_pt_data(rx, perf_file_descriptor, producer));
 
         Self {
             perf_file_descriptor,
-            mapping,
-
+            pc_map,
+            empty_buffer_notifier,
             read_handle,
             parse_handle,
             write_handle,
@@ -135,8 +142,8 @@ impl PtTracer {
 
     /// Waits for the internal ring buffer to be empty
     pub fn wait_for_empty(&self) {
-        // self.pt_buffer_empty.wait();
-        // self.data_buffer_empty.wait();
+        // log::trace!("waiting");
+        // self.empty_buffer_notifier.wait();
     }
 
     pub fn terminate(self) {
@@ -167,7 +174,6 @@ fn get_intel_pt_perf_type() -> u32 {
 fn read_pt_data(
     shutdown_receiver: Receiver<()>,
     perf_file_descriptor: i32,
-
     mut producer: Producer<DATA_BUFFER_SIZE>,
 ) {
     let mmap = memmap2::MmapOptions::new()
@@ -209,76 +215,126 @@ fn read_pt_data(
 
 fn parse_pt_data(
     shutdown_receiver: Receiver<()>,
-    mapping: Arc<RwLock<HashMap<u64, u64, BuildHasherDefault<XxHash64>>>>,
+    mapping: SharedPcMap,
+    empty_buffer_notifier: Notify,
     mut consumer: Consumer<DATA_BUFFER_SIZE>,
 ) {
     let mut writer = File::create(OUT_DIR.to_owned() + "intelpt.trace").unwrap();
 
+    let mut terminating = false;
+
+    let mut last_ip = 0;
+
     loop {
+        if let Ok(()) = shutdown_receiver.try_recv() {
+            log::trace!("parse terminating");
+            terminating = true;
+        }
+
         // read data from consumer, checking for shutdown if empty
         let mut read = match consumer.read() {
             Ok(read) => read,
+            Err(bbqueue::Error::InsufficientSize) => {
+                if terminating {
+                    log::trace!("insufficient size, terminating");
+                    return;
+                } else {
+                    // log::trace!("notify");
+                    // empty_buffer_notifier.notify();
+                    continue;
+                }
+            }
             Err(_) => {
                 continue;
             }
         };
 
-        if let Ok(()) = shutdown_receiver.try_recv() {
-            log::trace!("parse terminating");
+        let len = read.buf().len();
+        log::trace!("read {}", len);
 
-            parse_slice(&mut writer, mapping.clone(), read.buf_mut());
-
-            return;
-        }
-
-        log::trace!("read {}", read.buf().len());
-
-        let mut decoder =
-            PacketDecoder::new(&ConfigBuilder::new(read.buf_mut()).unwrap().finish()).unwrap();
-
-        if decoder.sync_forward().is_err() {
-            // insufficient data in buffer to find next sync point so allow more data to be written
-            continue;
-        }
-
-        let (begin, end) = {
-            let offset = decoder.sync_offset().unwrap();
-            decoder.sync_set(offset + 1).unwrap();
-            if decoder.sync_forward().is_err() {
-                continue;
+        match parse_single_sync(&mut writer, mapping.clone(), read.buf_mut(), &mut last_ip) {
+            Ok(idx) => {
+                log::trace!("finished, idx: {idx}");
+                read.release(idx);
             }
-            let next_offset = decoder.sync_offset().unwrap();
-            log::trace!("offsets {offset} {next_offset}");
-            (offset as usize, next_offset as usize)
-        };
+            Err(ParseError::NoSync) => {
+                // found no sync points, skip
+                log::trace!("skipping {len}");
+                read.release(len);
+            }
+            Err(ParseError::OneSync(start)) => {
+                if terminating {
+                    // parse all remaining bytes even if there isn't a final sync point
+                    log::trace!("parsing remaining bytes from {start}");
+                    parse_slice(
+                        &mut writer,
+                        mapping,
+                        &mut read.buf_mut()[start..],
+                        &mut last_ip,
+                    );
+                    return;
+                }
 
-        parse_slice(
-            &mut writer,
-            mapping.clone(),
-            &mut read.buf_mut()[begin..end],
-        );
+                // this should only occur once at the beginning
+                log::trace!("releasing {start} initial bytes");
+                read.release(start);
 
-        let offset = decoder.offset().unwrap() as usize;
-        decoder.sync_backward().unwrap();
-
-        log::trace!(
-            "finished, offset: {}, sync_offset: {}",
-            offset,
-            decoder.sync_offset().unwrap()
-        );
-
-        read.release(end);
+                // log::trace!("notify");
+                // empty_buffer_notifier.notify();
+            }
+        }
     }
 }
 
-fn parse_slice<W: Write>(
-    writer: &mut W,
-    mapping: Arc<RwLock<HashMap<u64, u64, BuildHasherDefault<XxHash64>>>>,
-    slice: &mut [u8],
-) {
+fn find_next_sync_point(slice: &mut [u8]) -> Option<usize> {
     let mut decoder = PacketDecoder::new(&ConfigBuilder::new(slice).unwrap().finish()).unwrap();
 
-    let mut last_ip = 0;
+    decoder
+        .sync_forward()
+        .ok()
+        .map(|_| decoder.sync_offset().unwrap() as usize)
+}
+
+enum ParseError {
+    /// Failed to parse slice as no sync points were found
+    NoSync,
+    /// Failed to parse slice as only a single sync point ({0:?}) was found
+    OneSync(usize),
+}
+
+/// Parse a single sync range
+fn parse_single_sync<W: Write>(
+    w: &mut W,
+    mapping: SharedPcMap,
+    slice: &mut [u8],
+    last_ip: &mut u64,
+) -> Result<usize, ParseError> {
+    let Some(start) = find_next_sync_point(slice) else {
+        // slice did not contain any sync points
+        return Err(ParseError::NoSync);
+    };
+
+    let Some(end) = find_next_sync_point(&mut slice[start + 1..]).map(|idx| idx + start + 1) else {
+        // slice only contained a single sync point
+        return Err(ParseError::OneSync(start));
+    };
+
+    log::trace!("parsing range {start}..{end}");
+    parse_slice(w, mapping, &mut slice[start..end], last_ip);
+
+    Ok(end)
+}
+
+///
+fn parse_slice<W: Write>(
+    writer: &mut W,
+    mapping: SharedPcMap,
+    slice: &mut [u8],
+    last_ip: &mut u64,
+) {
+    let mut decoder = PacketDecoder::new(&ConfigBuilder::new(slice).unwrap().finish()).unwrap();
+    decoder.sync_forward().unwrap();
+    assert_eq!(decoder.sync_offset().unwrap(), 0);
 
     loop {
         match decoder.next() {
@@ -286,14 +342,14 @@ fn parse_slice<W: Write>(
                 Packet::Tip(inner) => {
                     let ip = match inner.compression() {
                         Compression::Suppressed => continue,
-                        Compression::Update16 => (last_ip >> 16) << 16 | inner.tip(),
-                        Compression::Update32 => (last_ip >> 32) << 32 | inner.tip(),
-                        Compression::Update48 => (last_ip >> 32) << 32 | inner.tip(),
+                        Compression::Update16 => (*last_ip >> 16) << 16 | inner.tip(),
+                        Compression::Update32 => (*last_ip >> 32) << 32 | inner.tip(),
+                        Compression::Update48 => (*last_ip >> 32) << 32 | inner.tip(),
                         Compression::Sext48 => (((inner.tip() as i64) << 16) >> 16) as u64,
                         Compression::Full => inner.tip(),
                     };
 
-                    last_ip = ip;
+                    *last_ip = ip;
 
                     if let Some(guest_pc) = mapping.read().get(&(ip - 9)) {
                         writeln!(writer, "{:X}", guest_pc).unwrap();
@@ -301,15 +357,13 @@ fn parse_slice<W: Write>(
                 }
                 _ => (),
             },
+
             Err(e) => {
-                log::trace!("packet err: {e:?}");
-                if let Err(e) = decoder.sync_forward() {
-                    if e.code() == PtErrorCode::Eos {
-                        log::trace!("packet err: got eos while syncing after packet error");
-                        break;
-                    } else {
-                        log::trace!("packet err: got error while syncing {e:?}");
-                    }
+                if e.code() == PtErrorCode::Eos {
+                    log::trace!("reached eos");
+                    return;
+                } else {
+                    panic!("{:?}", e);
                 }
             }
         }

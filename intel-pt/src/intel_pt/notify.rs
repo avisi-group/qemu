@@ -1,5 +1,7 @@
-use parking_lot::{Condvar, Mutex};
-use std::sync::Arc;
+use {
+    parking_lot::{Condvar, Mutex},
+    std::sync::Arc,
+};
 
 #[derive(Clone)]
 pub struct Notify {
