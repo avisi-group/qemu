@@ -1,6 +1,6 @@
 use {
     crate::{
-        intel_pt::{parser::Parser, reader::Reader, writer::Writer},
+        intel_pt::{notify::Notify, parser::Parser, reader::Reader, writer::Writer},
         Mode, OUT_DIR,
     },
     bbqueue::BBBuffer,
@@ -35,6 +35,8 @@ pub struct HardwareTracer {
     pub perf_file_descriptor: i32,
     /// Host to guest address mapping
     pc_map: SharedPcMap,
+
+    empty_buffer_notifier: Notify,
     /// PT reader
     reader: Reader,
     /// Handle for PT parsing thread
@@ -100,15 +102,17 @@ impl HardwareTracer {
 
         let pc_map = Arc::new(RwLock::new(HashMap::default()));
         let (producer, consumer) = BUFFER.try_split().unwrap();
+        let empty_buffer_notifier = Notify::new();
 
         let (writer, queue) =
             Writer::init(OUT_DIR.to_owned() + "intelpt.trace", pc_map.clone(), mode);
-        let parser = Parser::init(consumer, queue, mode);
+        let parser = Parser::init(empty_buffer_notifier.clone(), consumer, queue, mode);
         let reader = Reader::init(perf_file_descriptor, producer);
 
         Self {
             perf_file_descriptor,
             pc_map,
+            empty_buffer_notifier,
             reader,
             parser,
             writer,
@@ -117,8 +121,8 @@ impl HardwareTracer {
 
     /// Waits for the internal ring buffer to be empty
     pub fn wait_for_empty(&self) {
-        // log::trace!("waiting");
-        // self.empty_buffer_notifier.wait();
+        log::trace!("waiting");
+        self.empty_buffer_notifier.wait();
     }
 
     pub fn exit(self) {

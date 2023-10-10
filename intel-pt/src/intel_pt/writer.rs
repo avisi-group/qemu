@@ -23,11 +23,13 @@ impl Writer {
         pc_map: SharedPcMap,
         mode: Mode,
     ) -> (Self, Arc<Mutex<BinaryHeap<ParsedData>>>) {
-        let writer = BufWriter::with_capacity(8 * 1024 * 1024, File::create(path).unwrap());
+        let writer = BufWriter::with_capacity(8 * 1024, File::create(path).unwrap());
         let priority_queue = Arc::new(Mutex::new(BinaryHeap::<ParsedData>::new()));
         let pq_clone = priority_queue.clone();
+
         let handle =
             ThreadHandle::spawn(move |rx| write_pt_data(rx, writer, pq_clone, pc_map, mode));
+
         (Self { handle }, priority_queue)
     }
 
@@ -74,6 +76,13 @@ fn write_pt_data<W: Write>(
 
         match mode {
             Mode::Tip => {
+                data.into_iter()
+                    .filter_map(|pc| pc_map.read().get(&pc).copied())
+                    .for_each(|pc| {
+                        w.write_all(&pc.to_le_bytes()).unwrap();
+                    });
+            }
+            Mode::Fup => {
                 data.into_iter()
                     .filter_map(|pc| pc_map.read().get(&pc).copied())
                     .for_each(|pc| {

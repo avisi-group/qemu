@@ -1,6 +1,6 @@
 use {
     crate::{
-        intel_pt::{thread_handle::ThreadHandle, ParsedData, BUFFER_SIZE},
+        intel_pt::{notify::Notify, thread_handle::ThreadHandle, ParsedData, BUFFER_SIZE},
         Mode,
     },
     bbqueue::Consumer,
@@ -21,13 +21,14 @@ pub struct Parser {
 
 impl Parser {
     pub fn init(
+        notify: Notify,
         consumer: Consumer<'static, BUFFER_SIZE>,
         queue: Arc<Mutex<BinaryHeap<ParsedData>>>,
         mode: Mode,
     ) -> Self {
         Self {
             handle: ThreadHandle::spawn(move |rx| {
-                ParserState::new(rx, consumer, queue, mode).run()
+                ParserState::new(rx, notify, consumer, queue, mode).run()
             }),
         }
     }
@@ -55,6 +56,7 @@ enum ParseError {
 
 struct ParserState {
     shutdown_receiver: Receiver<()>,
+    empty_buffer_notifier: Notify,
     consumer: Consumer<'static, BUFFER_SIZE>,
     queue: Arc<Mutex<BinaryHeap<ParsedData>>>,
     mode: Mode,
@@ -65,12 +67,14 @@ struct ParserState {
 impl ParserState {
     fn new(
         shutdown_receiver: Receiver<()>,
+        empty_buffer_notifier: Notify,
         consumer: Consumer<'static, BUFFER_SIZE>,
         queue: Arc<Mutex<BinaryHeap<ParsedData>>>,
         mode: Mode,
     ) -> Self {
         Self {
             shutdown_receiver,
+            empty_buffer_notifier,
             consumer,
             queue,
             mode,
@@ -96,8 +100,8 @@ impl ParserState {
                         log::trace!("insufficient size, terminating");
                         return;
                     } else {
-                        // log::trace!("notify");
-                        // empty_buffer_notifier.notify();
+                        log::trace!("notify");
+                        self.empty_buffer_notifier.notify();
                         continue;
                     }
                 }
@@ -131,8 +135,8 @@ impl ParserState {
                     log::trace!("releasing {start} initial bytes");
                     read.release(start);
 
-                    // log::trace!("notify");
-                    // empty_buffer_notifier.notify();
+                    log::trace!("notify");
+                    self.empty_buffer_notifier.notify();
                 }
             }
         }
@@ -182,22 +186,23 @@ impl ParserState {
                             self.last_ip = ip;
 
                             pcs.push(ip - 9);
-
-                            // if let Some(guest_pc) = mapping.read().get(&(ip -
-                            // 9)) {     writeln!
-                            // (writer, "{:x}", guest_pc).unwrap();
-                            // }
                         }
                         _ => (),
                     },
                     Mode::Fup => match p {
                         Packet::Fup(inner) => {
-                            let _ip = inner.fup();
+                            let ip = match inner.compression() {
+                                Compression::Suppressed => continue,
+                                Compression::Update16 => (self.last_ip >> 16) << 16 | inner.fup(),
+                                Compression::Update32 => (self.last_ip >> 32) << 32 | inner.fup(),
+                                Compression::Update48 => (self.last_ip >> 32) << 32 | inner.fup(),
+                                Compression::Sext48 => (((inner.fup() as i64) << 16) >> 16) as u64,
+                                Compression::Full => inner.fup(),
+                            };
 
-                            // if let Some(guest_pc) = mapping.read().get(&(ip -
-                            // 9)) {     writeln!
-                            // (writer, "{:x}", guest_pc).unwrap();
-                            // }
+                            self.last_ip = ip;
+
+                            pcs.push(ip);
                         }
                         _ => (),
                     },
@@ -215,7 +220,8 @@ impl ParserState {
                         log::trace!("reached eos");
                         break;
                     } else {
-                        panic!("{:?}", e);
+                        log::error!("packet error: {:?}", e);
+                        continue;
                     }
                 }
             }
