@@ -6019,7 +6019,7 @@ int tcg_gen_code(TCGContext *s, TranslationBlock *tb, uint64_t pc_start)
     if (intel_pt_insert_pt_write()) {
         tcg_out8(s, 0x48);
         tcg_out8(s, 0xb8);
-        tcg_out64(s, 0x1234);
+        tcg_out64(s, pc_start);
         tcg_out8(s, 0xf3);
         tcg_out8(s, 0x48);
         tcg_out8(s, 0x0f);

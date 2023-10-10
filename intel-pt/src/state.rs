@@ -1,5 +1,5 @@
 use {
-    crate::{intel_pt::PtTracer, Mode, OUT_DIR},
+    crate::{intel_pt::HardwareTracer, Mode, OUT_DIR},
     parking_lot::{lock_api::RawMutex, Mutex},
     std::{
         fs::File,
@@ -35,9 +35,11 @@ impl State {
         *self.inner.lock() = match mode {
             Mode::Simple => InnerState::Simple(BufWriter::with_capacity(
                 8 * 1024 * 1024,
-                File::create(&(OUT_DIR.to_owned() + "simple.trace")).unwrap(),
+                File::create(OUT_DIR.to_owned() + "simple.trace").unwrap(),
             )),
-            Mode::Tip | Mode::Fup | Mode::PtWrite => InnerState::IntelPt(PtTracer::init(mode)),
+            Mode::Tip | Mode::Fup | Mode::PtWrite => {
+                InnerState::IntelPt(HardwareTracer::init(mode))
+            }
             Mode::Uninitialized => unreachable!(),
         };
         self.mode.store(mode.into(), Ordering::Relaxed);
@@ -79,7 +81,7 @@ impl State {
             unreachable!();
         };
 
-        write!(f, "{pc:x}\n").unwrap();
+        f.write(&pc.to_le_bytes()).unwrap();
     }
 
     pub fn pc_mapping(&self, host_pc: u64, guest_pc: u64) {
@@ -118,7 +120,7 @@ impl State {
 enum InnerState {
     Uninitialized,
     Simple(BufWriter<File>),
-    IntelPt(PtTracer),
+    IntelPt(HardwareTracer),
 }
 
 impl Default for InnerState {

@@ -19,6 +19,7 @@ enum-kinds = "0.5.1"
 pretty_env_logger = "0.5.0"
 log = "0.4.20"
 bbqueue = "0.5.1"
+color-eyre = "0.6.2"
 
 [build-dependencies]
 cbindgen = "0.26.0"
