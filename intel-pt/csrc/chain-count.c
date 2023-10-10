@@ -6,7 +6,7 @@ static uint32_t *chain_count = NULL;
 void init_chain_count_cpu_state(uint32_t *c_count)
 {
    chain_count = c_count;
-   *chain_count = 1000;
+   reset_chain_count();
 }
 
 void reset_chain_count(void)

@@ -69,7 +69,7 @@ impl State {
     }
 
     pub fn insert_chain_count_check(&self) -> bool {
-        self.mode() != Mode::Simple
+        self.mode() == Mode::Tip || self.mode() == Mode::Fup || self.mode() == Mode::PtWrite
     }
 
     pub fn trace_guest_pc(&self, pc: u64) {

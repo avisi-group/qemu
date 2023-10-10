@@ -77,12 +77,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4682ae6287fcf752ecaabbfcc7b6f9b72aa33933dc23a554d853aea8eea8635"
 
 [[package]]
-name = "c-enum"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4b71931af9c2a7756e9eed1b6ac105c31588a44b496423b41412e506f0f47e5"
-
-[[package]]
 name = "cbindgen"
 version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -181,17 +175,6 @@ name = "derivative"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fcc3dd5e9e9c0b295d6e1e4d811fb6f157d5ffd784b8d202fc62eac8035a770b"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "enum-kinds"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e40a16955681d469ab3da85aaa6b42ff656b3c67b52e1d8d3dd36afe97fd462"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -321,14 +304,12 @@ dependencies = [
  "bbqueue",
  "cbindgen",
  "color-eyre",
- "enum-kinds",
  "libipt",
  "log",
  "memmap2",
  "page_size",
  "parking_lot",
  "perf-event-open-sys2",
- "perf-event2",
  "pretty_env_logger",
  "twox-hash",
 ]
@@ -510,36 +491,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "perf-event-data"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "963b5dfa83fa6c28af556b19fc258be88823de8af982469747c6594f48a8b9ba"
-dependencies = [
- "bitflags 2.4.0",
- "perf-event-open-sys2",
-]
-
-[[package]]
 name = "perf-event-open-sys2"
 version = "5.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "83659418a76adf99b97b487d6e4e73ea33e5d5dffb006fdd4aec8033995aaad3"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "perf-event2"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "463b1e66002294e9bded57bb46be9170b3876b7ceb090ce595f20b607577474a"
-dependencies = [
- "bitflags 2.4.0",
- "c-enum",
- "libc",
- "memmap2",
- "perf-event-data",
- "perf-event-open-sys2",
 ]
 
 [[package]]

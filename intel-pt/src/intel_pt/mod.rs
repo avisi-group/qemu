@@ -76,12 +76,35 @@ impl HardwareTracer {
         pea.set_exclude_hv(1);
         pea.set_precise_ip(2);
 
-        // 2401 to disable return compression
+        // 0 pt
+        // 1 cyc
+        // 2
+        // 3
 
+        // 4 pwr_evt
+        // 5 fup_on_ptw
+        // 7
+        // 8
+
+        // 9 mtc
+        // 10 tsc
+        // 11 noretcomp
+        // 12 ptw
+
+        // 13 branch
+        // 14-17 mtc_period
+
+        // 19-22 cyc_thresh
+
+        // 24-27 psb_period
+
+        // 31 event
+
+        // 55 notnt
         pea.config = if mode == Mode::PtWrite {
-            0b0011_0000_0000_0001
+            0b0001_0000_0000_0001
         } else {
-            0x2001 // 0010000000000001
+            0b0010_0000_0000_0001
         };
 
         pea.size = std::mem::size_of::<perf_event_attr>() as u32;

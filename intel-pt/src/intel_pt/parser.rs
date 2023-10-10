@@ -189,23 +189,7 @@ impl ParserState {
                         }
                         _ => (),
                     },
-                    Mode::Fup => match p {
-                        Packet::Fup(inner) => {
-                            let ip = match inner.compression() {
-                                Compression::Suppressed => continue,
-                                Compression::Update16 => (self.last_ip >> 16) << 16 | inner.fup(),
-                                Compression::Update32 => (self.last_ip >> 32) << 32 | inner.fup(),
-                                Compression::Update48 => (self.last_ip >> 32) << 32 | inner.fup(),
-                                Compression::Sext48 => (((inner.fup() as i64) << 16) >> 16) as u64,
-                                Compression::Full => inner.fup(),
-                            };
-
-                            self.last_ip = ip;
-
-                            pcs.push(ip);
-                        }
-                        _ => (),
-                    },
+                    Mode::Fup => todo!(),
                     Mode::PtWrite => match p {
                         Packet::Ptw(inner) => {
                             pcs.push(inner.payload());
