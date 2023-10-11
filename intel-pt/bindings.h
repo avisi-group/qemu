@@ -1,3 +1,8 @@
+/**
+ * Size of the Intel PT data buffer in bytes
+ */
+#define BUFFER_SIZE ((1024 * 1024) * 1024)
+
 void handle_arg_intel_pt(const char *arg);
 
 bool intel_pt_simple_tracing(void);

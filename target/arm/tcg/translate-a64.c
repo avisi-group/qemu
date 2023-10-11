@@ -25,7 +25,7 @@
 #include "arm_ldst.h"
 #include "semihosting/semihost.h"
 #include "cpregs.h"
-#include "intel-pt/intel-pt.h"
+#include "intel-pt/bindings.h"
 
 static TCGv_i64 cpu_X[32];
 static TCGv_i64 cpu_pc;

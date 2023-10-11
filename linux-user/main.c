@@ -55,7 +55,7 @@
 #include "loader.h"
 #include "user-mmap.h"
 #include "accel/tcg/perf.h"
-#include "intel-pt/intel-pt.h"
+#include "intel-pt/bindings.h"
 
 #ifdef CONFIG_SEMIHOSTING
 #include "semihosting/semihost.h"

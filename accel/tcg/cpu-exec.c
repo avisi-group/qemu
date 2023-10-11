@@ -43,7 +43,7 @@
 #include "tb-hash.h"
 #include "tb-context.h"
 #include "internal.h"
-#include "intel-pt/intel-pt.h"
+#include "intel-pt/bindings.h"
 #include "intel-pt/csrc/chain-count.h"
 
 /* -icount align implementation. */

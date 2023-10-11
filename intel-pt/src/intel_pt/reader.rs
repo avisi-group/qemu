@@ -53,6 +53,16 @@ fn read_pt_data(
                 let mut grant = producer
                     .grant_exact(record.data().len())
                     .expect(&format!("failed to grant {}", record.data().len()));
+                // let Ok(mut grant) = producer.grant_exact(record.data().len()) else {
+                //     use std::io::Write;
+                //     {
+                //         std::fs::File::create("/home/fm208/data/ringbuffer_ptwrite.dump")
+                //             .unwrap()
+                //             .write_all(consumer.read().unwrap().buf())
+                //             .unwrap();
+                //     }
+                //     panic!();
+                // };
                 record.data().copy_to_slice(grant.buf());
                 grant.commit(record.data().len());
             }

@@ -1,6 +1,11 @@
+use rayon::ThreadPoolBuilder;
+use std::ops::Range;
 use {
     crate::{
-        intel_pt::{notify::Notify, thread_handle::ThreadHandle, ParsedData, BUFFER_SIZE},
+        intel_pt::{
+            decoder::find_next_sync, notify::Notify, thread_handle::ThreadHandle, ParsedData,
+            BUFFER_SIZE,
+        },
         Mode,
     },
     bbqueue::Consumer,
@@ -14,6 +19,9 @@ use {
         sync::{mpsc::Receiver, Arc},
     },
 };
+
+const MAX_SYNCPOINTS: usize = 64;
+const NUM_THREADS: usize = 8;
 
 pub struct Parser {
     handle: ThreadHandle,
@@ -38,15 +46,6 @@ impl Parser {
     }
 }
 
-fn find_next_sync_point(slice: &mut [u8]) -> Option<usize> {
-    let mut decoder = PacketDecoder::new(&ConfigBuilder::new(slice).unwrap().finish()).unwrap();
-
-    decoder
-        .sync_forward()
-        .ok()
-        .map(|_| decoder.sync_offset().unwrap() as usize)
-}
-
 enum ParseError {
     /// Failed to parse slice as no sync points were found
     NoSync,
@@ -61,7 +60,7 @@ struct ParserState {
     queue: Arc<Mutex<BinaryHeap<ParsedData>>>,
     mode: Mode,
     last_ip: u64,
-    next_sequence_number: u32,
+    next_sequence_number: u64,
 }
 
 impl ParserState {
@@ -85,6 +84,11 @@ impl ParserState {
 
     fn run(&mut self) {
         let mut terminating = false;
+
+        let pool = ThreadPoolBuilder::new()
+            .num_threads(NUM_THREADS)
+            .build()
+            .unwrap();
 
         loop {
             if let Ok(()) = self.shutdown_receiver.try_recv() {
@@ -113,15 +117,13 @@ impl ParserState {
             let len = read.buf().len();
             log::trace!("read {}", len);
 
-            match self.parse_single_sync(read.buf_mut()) {
-                Ok(idx) => {
-                    log::trace!("finished, idx: {idx}");
-                    read.release(idx);
-                }
+            let range = match self.find_sync_range(read.buf_mut()) {
+                Ok(range) => range,
                 Err(ParseError::NoSync) => {
                     // found no sync points, skip
                     log::trace!("skipping {len}");
                     read.release(len);
+                    continue;
                 }
                 Err(ParseError::OneSync(start)) => {
                     if terminating {
@@ -131,34 +133,92 @@ impl ParserState {
                         return;
                     }
 
-                    // this should only occur once at the beginning
-                    log::trace!("releasing {start} initial bytes");
-                    read.release(start);
-
                     log::trace!("notify");
                     self.empty_buffer_notifier.notify();
+                    continue;
                 }
+            };
+
+            if self.mode != Mode::PtWrite {
+                panic!();
             }
+            let mut data = read.buf()[range.clone()].to_vec();
+            read.release(range.end);
+            let queue = self.queue.clone();
+            let sequence_number = self.next_sequence_number;
+            self.next_sequence_number += 1;
+            pool.spawn(move || {
+                let mut decoder =
+                    PacketDecoder::new(&ConfigBuilder::new(&mut data).unwrap().finish()).unwrap();
+                decoder.sync_forward().unwrap();
+                assert_eq!(decoder.sync_offset().unwrap(), 0);
+
+                let mut pcs = vec![];
+
+                loop {
+                    match decoder.next() {
+                        Ok(p) => match p {
+                            Packet::Ptw(inner) => {
+                                pcs.push(inner.payload());
+                            }
+                            _ => (),
+                        },
+                        Err(e) => {
+                            if e.code() == PtErrorCode::Eos {
+                                log::trace!("reached eos");
+                                break;
+                            } else {
+                                log::error!("packet error: {:?}", e);
+                                continue;
+                            }
+                        }
+                    }
+                }
+
+                queue.lock().push(ParsedData {
+                    sequence_number,
+                    data: pcs,
+                });
+            });
+
+            // log::trace!("parsing range {range:?}");
+            // self.parse_slice(&mut read.buf_mut()[range]);
         }
     }
 
-    /// Parse a single sync range
-    fn parse_single_sync(&mut self, slice: &mut [u8]) -> Result<usize, ParseError> {
-        let Some(start) = find_next_sync_point(slice) else {
+    fn find_sync_range(&mut self, slice: &mut [u8]) -> Result<Range<usize>, ParseError> {
+        let Some(start) = find_next_sync(slice) else {
             // slice did not contain any sync points
             return Err(ParseError::NoSync);
         };
 
-        let Some(end) = find_next_sync_point(&mut slice[start + 1..]).map(|idx| idx + start + 1)
-        else {
+        let mut syncpoints = vec![start];
+
+        loop {
+            if syncpoints.len() == MAX_SYNCPOINTS {
+                break;
+            }
+
+            let last = syncpoints.last().unwrap();
+
+            if last + 1 >= slice.len() {
+                break;
+            }
+
+            match find_next_sync(&mut slice[last + 1..]) {
+                Some(syncpoint) => {
+                    syncpoints.push(syncpoint + last + 1);
+                }
+                None => break,
+            }
+        }
+
+        if syncpoints.len() == 1 {
             // slice only contained a single sync point
-            return Err(ParseError::OneSync(start));
-        };
+            return Err(ParseError::OneSync(syncpoints[0]));
+        }
 
-        log::trace!("parsing range {start}..{end}");
-        self.parse_slice(&mut slice[start..end]);
-
-        Ok(end)
+        Ok(syncpoints[0]..*syncpoints.last().unwrap())
     }
 
     ///

@@ -25,7 +25,7 @@
 #include "../tcg-ldst.c.inc"
 #include "../tcg-pool.c.inc"
 #include "intel-pt/csrc/chain-count.h"
-#include "intel-pt/intel-pt.h"
+#include "intel-pt/bindings.h"
 
 #ifdef CONFIG_DEBUG_TCG
 static const char * const tcg_target_reg_names[TCG_TARGET_NB_REGS] = {

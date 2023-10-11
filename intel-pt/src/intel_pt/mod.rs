@@ -10,13 +10,13 @@ use {
     twox_hash::XxHash64,
 };
 
-mod decoder;
-mod notify;
-mod parser;
-mod reader;
-mod ring_buffer;
-mod thread_handle;
-mod writer;
+pub mod decoder;
+pub mod notify;
+pub mod parser;
+pub mod reader;
+pub mod ring_buffer;
+pub mod thread_handle;
+pub mod writer;
 
 type SharedPcMap = Arc<RwLock<HashMap<u64, u64, BuildHasherDefault<XxHash64>>>>;
 
@@ -27,7 +27,7 @@ const INTEL_PT_TYPE_PATH: &str = "/sys/bus/event_source/devices/intel_pt/type";
 const _SYNC_POINTS_PER_JOB: usize = 32;
 
 /// Size of the Intel PT data buffer in bytes
-const BUFFER_SIZE: usize = 512 * 1024 * 1024;
+pub const BUFFER_SIZE: usize = 1024 * 1024 * 1024;
 
 static BUFFER: BBBuffer<BUFFER_SIZE> = BBBuffer::new();
 
@@ -174,7 +174,7 @@ fn get_intel_pt_perf_type() -> u32 {
 }
 
 pub struct ParsedData {
-    pub sequence_number: u32,
+    pub sequence_number: u64,
     pub data: Vec<u64>,
 }
 

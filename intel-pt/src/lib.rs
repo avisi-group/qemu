@@ -1,8 +1,8 @@
 use {crate::state::State, std::str::FromStr};
 
-mod ffi;
-mod intel_pt;
-mod state;
+pub mod ffi;
+pub mod intel_pt;
+pub mod state;
 
 const OUT_DIR: &str = "/home/fm208/data/";
 

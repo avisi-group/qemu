@@ -22,7 +22,7 @@
 #include "qemu.h"
 #include "user-internals.h"
 #include "qemu/plugin.h"
-#include "intel-pt/intel-pt.h"
+#include "intel-pt/bindings.h"
 #ifdef CONFIG_GPROF
 #include <sys/gmon.h>
 #endif
