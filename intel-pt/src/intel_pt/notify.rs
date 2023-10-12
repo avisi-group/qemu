@@ -15,7 +15,7 @@ impl Notify {
         }
     }
 
-    /// Notifies any waiting threads
+    /// Notifies a single waiting thread
     pub fn notify(&self) {
         let mut fired = self.inner.0.lock();
         *fired = true;
@@ -25,7 +25,7 @@ impl Notify {
     /// Waits for any notifications
     pub fn wait(&self) {
         let mut fired = self.inner.0.lock();
-        if !*fired {
+        while !*fired {
             self.inner.1.wait(&mut fired);
         }
         *fired = false;
