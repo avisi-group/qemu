@@ -1,6 +1,7 @@
-use std::{mem::size_of, slice};
-
-use libipt::{packet::PacketDecoder, ConfigBuilder};
+use {
+    libipt::{packet::PacketDecoder, ConfigBuilder},
+    std::{mem::size_of, slice},
+};
 
 const PT_OPC_PSB: u8 = 0x02;
 const PT_EXT_PSB: u8 = 0x82;

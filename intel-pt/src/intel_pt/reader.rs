@@ -1,7 +1,10 @@
-use crate::intel_pt::thread_handle::Context;
 use {
     crate::{
-        intel_pt::{ring_buffer::RingBuffer, thread_handle::ThreadHandle, BUFFER_SIZE},
+        intel_pt::{
+            ring_buffer::RingBuffer,
+            thread_handle::{Context, ThreadHandle},
+            BUFFER_SIZE,
+        },
         Mode,
     },
     bbqueue::Producer,

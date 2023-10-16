@@ -1,9 +1,10 @@
-use crate::intel_pt::thread_handle::Context;
 use {
     crate::{
         intel_pt::{
-            decoder::find_next_sync, notify::Notify, thread_handle::ThreadHandle, ParsedData,
-            BUFFER_SIZE,
+            decoder::find_next_sync,
+            notify::Notify,
+            thread_handle::{Context, ThreadHandle},
+            ParsedData, BUFFER_SIZE,
         },
         Mode,
     },
@@ -164,6 +165,7 @@ impl ParserState {
                             Packet::Ptw(inner) => {
                                 pcs.push(inner.payload());
                             }
+                            Packet::Tip(_) => {}
                             _ => (),
                         },
                         Err(e) => {

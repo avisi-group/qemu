@@ -1,8 +1,7 @@
-use memmap2::Mmap;
-use std::path::Path;
 use {
     color_eyre::eyre::Result,
-    std::{env::args, fs::File, mem::size_of, process::exit},
+    memmap2::Mmap,
+    std::{env::args, fs::File, mem::size_of, path::Path, process::exit},
 };
 
 fn main() -> Result<()> {

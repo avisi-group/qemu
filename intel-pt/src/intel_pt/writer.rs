@@ -1,7 +1,9 @@
-use crate::intel_pt::thread_handle::Context;
 use {
     crate::{
-        intel_pt::{thread_handle::ThreadHandle, ParsedData, SharedPcMap},
+        intel_pt::{
+            thread_handle::{Context, ThreadHandle},
+            ParsedData, SharedPcMap,
+        },
         Mode,
     },
     parking_lot::Mutex,
