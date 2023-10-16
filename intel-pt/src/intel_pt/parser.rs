@@ -96,7 +96,7 @@ impl ParserState {
             }
 
             // read data from consumer, checking for shutdown if empty
-            let mut read = match self.consumer.read() {
+            let read = match self.consumer.split_read() {
                 Ok(read) => read,
                 Err(bbqueue::Error::InsufficientSize) => {
                     if terminating {
@@ -113,10 +113,11 @@ impl ParserState {
                 }
             };
 
-            let len = read.buf().len();
-            log::trace!("read {}", len);
+            let mut data = read.bufs().0.to_owned();
+            data.extend_from_slice(read.bufs().1);
+            let len = read.combined_len();
 
-            let range = match self.find_sync_range(read.buf_mut()) {
+            let range = match self.find_sync_range(&mut data) {
                 Ok(range) => range,
                 Err(ParseError::NoSync) => {
                     // found no sync points, skip
@@ -128,7 +129,7 @@ impl ParserState {
                     if terminating {
                         // parse all remaining bytes even if there isn't a final sync point
                         log::trace!("parsing remaining bytes from {start}");
-                        self.parse_slice(&mut read.buf_mut()[start..]);
+                        self.parse_slice(&mut data[start..]);
                         return;
                     }
 
@@ -141,12 +142,13 @@ impl ParserState {
             if self.mode != Mode::PtWrite {
                 panic!();
             }
-            let mut data = read.buf()[range.clone()].to_vec();
+
+            let mut data = &mut data[range.clone()];
             read.release(range.end);
             let queue = self.queue.clone();
             let sequence_number = self.next_sequence_number;
             self.next_sequence_number += 1;
-            pool.spawn(move || {
+            {
                 let mut decoder =
                     PacketDecoder::new(&ConfigBuilder::new(&mut data).unwrap().finish()).unwrap();
                 decoder.sync_forward().unwrap();
@@ -178,7 +180,7 @@ impl ParserState {
                     sequence_number,
                     data: pcs,
                 });
-            });
+            };
 
             // log::trace!("parsing range {range:?}");
             // self.parse_slice(&mut read.buf_mut()[range]);

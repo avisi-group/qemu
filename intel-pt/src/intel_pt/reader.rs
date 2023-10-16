@@ -135,15 +135,15 @@ fn read_pt_data(
     ctx.ready();
 
     loop {
-        let had_event = ring_buffer.next_record(|buf| {
+        let had_record = ring_buffer.next_record(|buf| {
             let mut grant = producer
                 .grant_exact(buf.len())
                 .expect(&format!("failed to grant {}", buf.len()));
-            buf.copy_to_slice(grant.buf());
+            grant.buf().copy_from_slice(buf);
             grant.commit(buf.len());
         });
 
-        if !had_event {
+        if !had_record {
             if ctx.received_exit() {
                 log::trace!("read terminating");
                 return;

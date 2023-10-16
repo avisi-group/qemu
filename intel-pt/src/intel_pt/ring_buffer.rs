@@ -29,7 +29,7 @@ impl RingBuffer {
         self.mmap.as_mut_ptr() as *mut _
     }
 
-    pub fn next_record<F: FnMut(ByteBuffer)>(&mut self, mut f: F) -> bool {
+    pub fn next_record<F: FnMut(&[u8])>(&mut self, mut process: F) -> bool {
         let header = self.page();
 
         // SAFETY:
@@ -54,43 +54,37 @@ impl RingBuffer {
         let wrapped_head = head % self.size;
         let wrapped_tail = tail % self.size;
 
-        let byte_buffer = if wrapped_head > wrapped_tail {
+        if wrapped_head > wrapped_tail {
             // from tail --> head
-            ByteBuffer::Single(unsafe {
+            let slice = unsafe {
                 slice::from_raw_parts(
                     self.aux_area.as_mut_ptr().add(wrapped_tail),
                     wrapped_head - wrapped_tail,
                 )
-            })
+            };
+            process(slice);
         } else {
-            ByteBuffer::Split([
-                unsafe {
-                    slice::from_raw_parts(
-                        self.aux_area.as_mut_ptr().add(wrapped_tail),
-                        self.size - wrapped_tail,
-                    )
-                },
-                unsafe { slice::from_raw_parts(self.aux_area.as_mut_ptr(), wrapped_head) },
-            ])
+            let a = unsafe {
+                slice::from_raw_parts(
+                    self.aux_area.as_mut_ptr().add(wrapped_tail),
+                    self.size - wrapped_tail,
+                )
+            };
+            process(a);
+
+            let b = unsafe { slice::from_raw_parts(self.aux_area.as_mut_ptr(), wrapped_head) };
+            process(b);
         };
 
-        f(byte_buffer);
-
+        // ATOMICS:
+        // - The release store here prevents the compiler from re-ordering any reads
+        //   past the store to data_tail.
+        // SAFETY:
+        // - page points to a valid instance of perf_event_mmap_page
         unsafe {
-            // SAFETY:
-            // - page points to a valid instance of perf_event_mmap_page
-            // - data_tail is only written on our side so it is safe to do a non-atomic read
-            //   here.
-            let tail = ptr::read(ptr::addr_of!((*header).aux_tail));
-
-            // ATOMICS:
-            // - The release store here prevents the compiler from re-ordering any reads
-            //   past the store to data_tail.
-            // SAFETY:
-            // - page points to a valid instance of perf_event_mmap_page
             atomic_store(
                 ptr::addr_of!((*header).aux_tail),
-                tail + (byte_buffer.len() as u64),
+                u64::try_from(head).unwrap(),
                 Ordering::Release,
             );
         }
