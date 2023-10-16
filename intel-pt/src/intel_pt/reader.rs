@@ -48,29 +48,18 @@ fn read_pt_data(
     let mut ring_buffer = RingBuffer::new(mmap, aux_area);
 
     loop {
-        match ring_buffer.next_record() {
-            Some(record) => {
-                let mut grant = producer
-                    .grant_exact(record.data().len())
-                    .expect(&format!("failed to grant {}", record.data().len()));
-                // let Ok(mut grant) = producer.grant_exact(record.data().len()) else {
-                //     use std::io::Write;
-                //     {
-                //         std::fs::File::create("/home/fm208/data/ringbuffer_ptwrite.dump")
-                //             .unwrap()
-                //             .write_all(consumer.read().unwrap().buf())
-                //             .unwrap();
-                //     }
-                //     panic!();
-                // };
-                record.data().copy_to_slice(grant.buf());
-                grant.commit(record.data().len());
-            }
-            None => {
-                if let Ok(()) = shutdown_receiver.try_recv() {
-                    log::trace!("read terminating");
-                    return;
-                }
+        let had_event = ring_buffer.next_record(|buf| {
+            let mut grant = producer
+                .grant_exact(buf.len())
+                .expect(&format!("failed to grant {}", buf.len()));
+            buf.copy_to_slice(grant.buf());
+            grant.commit(buf.len());
+        });
+
+        if !had_event {
+            if let Ok(()) = shutdown_receiver.try_recv() {
+                log::trace!("read terminating");
+                return;
             }
         }
     }

@@ -357,7 +357,7 @@ checksum = "a08173bc88b7955d1b3145aa561539096c421ac8debde8cbc3612ec635fee29b"
 [[package]]
 name = "libipt"
 version = "0.1.4"
-source = "git+https://github.com/sum-catnip/libipt-rs#1dc124b330e5363e44791550f37e7a6108f5c824"
+source = "git+https://github.com/sum-catnip/libipt-rs?rev=1dc124b#1dc124b330e5363e44791550f37e7a6108f5c824"
 dependencies = [
  "bitflags 1.3.2",
  "libipt-sys",

@@ -29,7 +29,7 @@ impl RingBuffer {
         self.mmap.as_mut_ptr() as *mut _
     }
 
-    pub fn next_record(&mut self) -> Option<Record> {
+    pub fn next_record<F: FnMut(ByteBuffer)>(&mut self, mut f: F) -> bool {
         let header = self.page();
 
         // SAFETY:
@@ -48,7 +48,7 @@ impl RingBuffer {
             unsafe { atomic_load(ptr::addr_of!((*header).aux_head), Ordering::Acquire) } as usize;
 
         if tail == head {
-            return None;
+            return false;
         }
 
         let wrapped_head = head % self.size;
@@ -74,33 +74,7 @@ impl RingBuffer {
             ])
         };
 
-        Some(Record {
-            rb: self,
-            data: byte_buffer,
-        })
-    }
-}
-
-pub struct Record<'rb> {
-    rb: &'rb RingBuffer,
-    data: ByteBuffer<'rb>,
-}
-
-impl<'rb> Record<'rb> {
-    pub fn data(&self) -> ByteBuffer<'rb> {
-        self.data
-    }
-}
-
-// Record contains a pointer which prevents it from implementing Send or Sync
-// by default. It is, however, valid to send it across threads and it has no
-// interior mutability so we implement Send and Sync here manually.
-unsafe impl<'rb> Sync for Record<'rb> {}
-unsafe impl<'rb> Send for Record<'rb> {}
-
-impl<'rb> Drop for Record<'rb> {
-    fn drop(&mut self) {
-        let header = self.rb.page();
+        f(byte_buffer);
 
         unsafe {
             // SAFETY:
@@ -116,10 +90,12 @@ impl<'rb> Drop for Record<'rb> {
             // - page points to a valid instance of perf_event_mmap_page
             atomic_store(
                 ptr::addr_of!((*header).aux_tail),
-                tail + (self.data().len() as u64),
+                tail + (byte_buffer.len() as u64),
                 Ordering::Release,
             );
         }
+
+        true
     }
 }
 
@@ -146,15 +122,14 @@ impl<'a> ByteBuffer<'a> {
     ///
     /// # Panics
     /// Panics if `self.len() != dst.len()`
-    pub fn copy_to_slice(&mut self, dst: &mut [u8]) {
+    pub fn copy_to_slice(&self, dst: &mut [u8]) {
         assert!(self.len() == dst.len());
 
         match self {
             Self::Single(buf) => {
                 dst.copy_from_slice(buf);
             }
-
-            &mut Self::Split([a, b]) => {
+            Self::Split([a, b]) => {
                 dst[..a.len()].copy_from_slice(a);
                 dst[a.len()..].copy_from_slice(b);
             }
