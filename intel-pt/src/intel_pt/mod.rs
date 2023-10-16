@@ -89,8 +89,6 @@ impl HardwareTracer {
         let parser = Parser::init(empty_buffer_notifier.clone(), consumer, queue, mode);
         let (reader, perf_file_descriptor) = Reader::init(producer, mode);
 
-        std::thread::sleep(std::time::Duration::from_millis(100));
-
         Self {
             perf_file_descriptor,
             pc_map,

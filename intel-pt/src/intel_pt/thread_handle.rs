@@ -1,28 +1,71 @@
-use std::{
-    sync::mpsc::{self, Receiver, Sender},
-    thread::{self, JoinHandle},
+use {
+    log::trace,
+    std::{
+        sync::mpsc::{self, Receiver, Sender},
+        thread::{self, JoinHandle},
+    },
 };
+
+enum Event {
+    /// Thread has finished setup
+    Ready,
+    /// Thread should shutdown
+    Exit,
+}
 
 pub struct ThreadHandle {
     handle: JoinHandle<()>,
-    shutdown_sender: Sender<()>,
+    tx: Sender<Event>,
+    _rx: Receiver<Event>,
 }
 
 impl ThreadHandle {
-    pub fn spawn<F: FnOnce(Receiver<()>) + Send + 'static>(f: F) -> Self {
-        let (shutdown_sender, shutdown_receiver) = mpsc::channel();
+    pub fn spawn<F: FnOnce(Context) + Send + 'static>(f: F) -> Self {
+        let (thread_tx, thread_rx) = mpsc::channel();
+        let (parent_tx, parent_rx) = mpsc::channel();
+
+        let context = Context {
+            tx: thread_tx,
+            rx: parent_rx,
+        };
+
+        let handle = thread::spawn(|| f(context));
+
+        let Ok(Event::Ready) = thread_rx.recv() else {
+            panic!("Failed to receive ready event from spawned thread")
+        };
 
         Self {
-            handle: thread::spawn(|| f(shutdown_receiver)),
-            shutdown_sender,
+            handle,
+            tx: parent_tx,
+            _rx: thread_rx,
         }
     }
 
     pub fn exit(self) {
-        log::trace!("sending shutdown");
-        self.shutdown_sender.send(()).unwrap();
-        log::trace!("waiting on join");
+        trace!("sending exit");
+        self.tx.send(Event::Exit).unwrap();
+        trace!("waiting on join");
         self.handle.join().unwrap();
-        log::trace!("joined");
+        trace!("joined");
+    }
+}
+
+pub struct Context {
+    tx: Sender<Event>,
+    rx: Receiver<Event>,
+}
+
+impl Context {
+    pub fn ready(&self) {
+        self.tx.send(Event::Ready).unwrap();
+    }
+
+    pub fn received_exit(&self) -> bool {
+        if let Ok(Event::Exit) = self.rx.try_recv() {
+            true
+        } else {
+            false
+        }
     }
 }

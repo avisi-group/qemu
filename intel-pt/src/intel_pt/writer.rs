@@ -1,3 +1,4 @@
+use crate::intel_pt::thread_handle::Context;
 use {
     crate::{
         intel_pt::{thread_handle::ThreadHandle, ParsedData, SharedPcMap},
@@ -9,7 +10,7 @@ use {
         fs::File,
         io::{BufWriter, Write},
         path::Path,
-        sync::{mpsc::Receiver, Arc},
+        sync::Arc,
     },
 };
 
@@ -28,7 +29,7 @@ impl Writer {
         let pq_clone = priority_queue.clone();
 
         let handle =
-            ThreadHandle::spawn(move |rx| write_pt_data(rx, writer, pq_clone, pc_map, mode));
+            ThreadHandle::spawn(move |ctx| write_pt_data(ctx, writer, pq_clone, pc_map, mode));
 
         (Self { handle }, priority_queue)
     }
@@ -39,7 +40,7 @@ impl Writer {
 }
 
 fn write_pt_data<W: Write>(
-    shutdown_receiver: Receiver<()>,
+    ctx: Context,
     mut w: W,
     queue: Arc<Mutex<BinaryHeap<ParsedData>>>,
     pc_map: SharedPcMap,
@@ -47,6 +48,9 @@ fn write_pt_data<W: Write>(
 ) {
     log::trace!("starting");
     let mut next_sequence_num = 0;
+
+    ctx.ready();
+
     loop {
         let ParsedData { data, .. } = {
             let mut guard = queue.lock();
@@ -55,7 +59,7 @@ fn write_pt_data<W: Write>(
                 sequence_number, ..
             }) = guard.peek()
             else {
-                if let Ok(()) = shutdown_receiver.try_recv() {
+                if ctx.received_exit() {
                     log::trace!("writer terminating");
                     w.flush().unwrap();
                     return;

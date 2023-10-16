@@ -1,3 +1,4 @@
+use crate::intel_pt::thread_handle::Context;
 use {
     crate::{
         intel_pt::{ring_buffer::RingBuffer, thread_handle::ThreadHandle, BUFFER_SIZE},
@@ -14,7 +15,6 @@ use {
         process,
         sync::{
             atomic::{AtomicI32, Ordering},
-            mpsc::Receiver,
             Arc,
         },
     },
@@ -36,7 +36,7 @@ impl Reader {
         let fd = perf_file_descriptor.clone();
         (
             Self {
-                handle: ThreadHandle::spawn(move |rx| read_pt_data(rx, fd, producer, mode)),
+                handle: ThreadHandle::spawn(move |ctx| read_pt_data(ctx, fd, producer, mode)),
             },
             perf_file_descriptor,
         )
@@ -48,7 +48,7 @@ impl Reader {
 }
 
 fn read_pt_data(
-    shutdown_receiver: Receiver<()>,
+    ctx: Context,
     perf_file_descriptor: Arc<AtomicI32>,
     mut producer: Producer<BUFFER_SIZE>,
     mode: Mode,
@@ -132,6 +132,8 @@ fn read_pt_data(
 
     let mut ring_buffer = RingBuffer::new(mmap, aux_area);
 
+    ctx.ready();
+
     loop {
         let had_event = ring_buffer.next_record(|buf| {
             let mut grant = producer
@@ -142,7 +144,7 @@ fn read_pt_data(
         });
 
         if !had_event {
-            if let Ok(()) = shutdown_receiver.try_recv() {
+            if ctx.received_exit() {
                 log::trace!("read terminating");
                 return;
             }

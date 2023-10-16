@@ -1,3 +1,4 @@
+use crate::intel_pt::thread_handle::Context;
 use {
     crate::{
         intel_pt::{
@@ -13,11 +14,7 @@ use {
     },
     parking_lot::Mutex,
     rayon::ThreadPoolBuilder,
-    std::{
-        collections::BinaryHeap,
-        ops::Range,
-        sync::{mpsc::Receiver, Arc},
-    },
+    std::{collections::BinaryHeap, ops::Range, sync::Arc},
 };
 
 const MAX_SYNCPOINTS: usize = 64;
@@ -35,8 +32,8 @@ impl Parser {
         mode: Mode,
     ) -> Self {
         Self {
-            handle: ThreadHandle::spawn(move |rx| {
-                ParserState::new(rx, notify, consumer, queue, mode).run()
+            handle: ThreadHandle::spawn(move |ctx| {
+                ParserState::new(ctx, notify, consumer, queue, mode).run()
             }),
         }
     }
@@ -54,7 +51,7 @@ enum ParseError {
 }
 
 struct ParserState {
-    shutdown_receiver: Receiver<()>,
+    ctx: Context,
     empty_buffer_notifier: Notify,
     consumer: Consumer<'static, BUFFER_SIZE>,
     queue: Arc<Mutex<BinaryHeap<ParsedData>>>,
@@ -65,14 +62,14 @@ struct ParserState {
 
 impl ParserState {
     fn new(
-        shutdown_receiver: Receiver<()>,
+        ctx: Context,
         empty_buffer_notifier: Notify,
         consumer: Consumer<'static, BUFFER_SIZE>,
         queue: Arc<Mutex<BinaryHeap<ParsedData>>>,
         mode: Mode,
     ) -> Self {
         Self {
-            shutdown_receiver,
+            ctx,
             empty_buffer_notifier,
             consumer,
             queue,
@@ -90,8 +87,10 @@ impl ParserState {
             .build()
             .unwrap();
 
+        self.ctx.ready();
+
         loop {
-            if let Ok(()) = self.shutdown_receiver.try_recv() {
+            if self.ctx.received_exit() {
                 log::trace!("parse terminating");
                 terminating = true;
             }
