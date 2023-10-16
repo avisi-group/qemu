@@ -143,12 +143,14 @@ impl ParserState {
                 panic!();
             }
 
-            let mut data = &mut data[range.clone()];
             read.release(range.end);
+            assert_eq!(0, range.start);
+            data.truncate(range.end);
+
             let queue = self.queue.clone();
             let sequence_number = self.next_sequence_number;
             self.next_sequence_number += 1;
-            {
+            pool.spawn(move || {
                 let mut decoder =
                     PacketDecoder::new(&ConfigBuilder::new(&mut data).unwrap().finish()).unwrap();
                 decoder.sync_forward().unwrap();
@@ -180,7 +182,7 @@ impl ParserState {
                     sequence_number,
                     data: pcs,
                 });
-            };
+            });
 
             // log::trace!("parsing range {range:?}");
             // self.parse_slice(&mut read.buf_mut()[range]);
