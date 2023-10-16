@@ -1,5 +1,3 @@
-use rayon::ThreadPoolBuilder;
-use std::ops::Range;
 use {
     crate::{
         intel_pt::{
@@ -14,8 +12,10 @@ use {
         ConfigBuilder, PtErrorCode,
     },
     parking_lot::Mutex,
+    rayon::ThreadPoolBuilder,
     std::{
         collections::BinaryHeap,
+        ops::Range,
         sync::{mpsc::Receiver, Arc},
     },
 };

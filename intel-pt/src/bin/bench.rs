@@ -1,9 +1,8 @@
-use scribe::intel_pt::{notify::Notify, BUFFER_SIZE};
 use {
     bbqueue::BBBuffer,
     parking_lot::RwLock,
     scribe::{
-        intel_pt::{parser::Parser, writer::Writer},
+        intel_pt::{notify::Notify, parser::Parser, writer::Writer, BUFFER_SIZE},
         Mode,
     },
     std::{collections::HashMap, sync::Arc},
