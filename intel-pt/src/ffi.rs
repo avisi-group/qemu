@@ -3,8 +3,11 @@ use {
     std::ffi::{c_char, CStr},
 };
 
+/// # Safety
+///
+/// Arg must be a valid pointer to a valid C string
 #[no_mangle]
-pub extern "C" fn handle_arg_intel_pt(arg: *const c_char) {
+pub unsafe extern "C" fn handle_arg_intel_pt(arg: *const c_char) {
     STATE.handle_arg(unsafe { CStr::from_ptr(arg) }.to_str().unwrap());
 }
 

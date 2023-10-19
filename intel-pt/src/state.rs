@@ -81,7 +81,7 @@ impl State {
             unreachable!();
         };
 
-        f.write(&pc.to_le_bytes()).unwrap();
+        f.write_all(&pc.to_le_bytes()).unwrap();
     }
 
     pub fn pc_mapping(&self, host_pc: u64, guest_pc: u64) {

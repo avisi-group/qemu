@@ -34,7 +34,7 @@ impl RingBuffer {
 
         // SAFETY:
         // - page points to a valid instance of perf_event_mmap_page.
-        // - data_tail is only written by the user side so it is safe to do a non-atomic
+        // - aux_tail is only written by the user side so it is safe to do a non-atomic
         //   read here.
         let tail = unsafe { ptr::read(ptr::addr_of!((*header).aux_tail)) } as usize;
 
@@ -51,11 +51,12 @@ impl RingBuffer {
             return false;
         }
 
+        // head and tail constantly increase, need to wrap them to index the ring buffer
         let wrapped_head = head % self.size;
         let wrapped_tail = tail % self.size;
 
         if wrapped_head > wrapped_tail {
-            // from tail --> head
+            // single slice from tail to head
             let slice = unsafe {
                 slice::from_raw_parts(
                     self.aux_area.as_mut_ptr().add(wrapped_tail),
@@ -64,21 +65,23 @@ impl RingBuffer {
             };
             process(slice);
         } else {
-            let a = unsafe {
+            // head is *less* than tail
+
+            // so first slice goes from tail to the end of the buffer
+            process(unsafe {
                 slice::from_raw_parts(
                     self.aux_area.as_mut_ptr().add(wrapped_tail),
                     self.size - wrapped_tail,
                 )
-            };
-            process(a);
+            });
 
-            let b = unsafe { slice::from_raw_parts(self.aux_area.as_mut_ptr(), wrapped_head) };
-            process(b);
+            // and the second slice goes from the beginning to the head
+            process(unsafe { slice::from_raw_parts(self.aux_area.as_mut_ptr(), wrapped_head) });
         };
 
         // ATOMICS:
         // - The release store here prevents the compiler from re-ordering any reads
-        //   past the store to data_tail.
+        //   past the store to aux_tail.
         // SAFETY:
         // - page points to a valid instance of perf_event_mmap_page
         unsafe {
@@ -90,44 +93,6 @@ impl RingBuffer {
         }
 
         true
-    }
-}
-
-/// A `Buf` that can be either a single byte slice or two disjoint byte
-/// slices.
-#[derive(Clone, Copy)]
-pub enum ByteBuffer<'a> {
-    Single(&'a [u8]),
-    Split([&'a [u8]; 2]),
-}
-
-impl<'a> ByteBuffer<'a> {
-    pub fn len(&self) -> usize {
-        match self {
-            Self::Single(buf) => buf.len(),
-            Self::Split([a, b]) => a.len() + b.len(),
-        }
-    }
-
-    /// Copy bytes from within this byte buffer to the provided slice.
-    ///
-    /// This will also remove those same bytes from the front of this byte
-    /// buffer.
-    ///
-    /// # Panics
-    /// Panics if `self.len() != dst.len()`
-    pub fn copy_to_slice(&self, dst: &mut [u8]) {
-        assert!(self.len() == dst.len());
-
-        match self {
-            Self::Single(buf) => {
-                dst.copy_from_slice(buf);
-            }
-            Self::Split([a, b]) => {
-                dst[..a.len()].copy_from_slice(a);
-                dst[a.len()..].copy_from_slice(b);
-            }
-        }
     }
 }
 

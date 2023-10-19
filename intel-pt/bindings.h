@@ -3,6 +3,11 @@
  */
 #define BUFFER_SIZE ((1024 * 1024) * 1024)
 
+/**
+ * # Safety
+ *
+ * Arg must be a valid pointer to a valid C string
+ */
 void handle_arg_intel_pt(const char *arg);
 
 bool intel_pt_simple_tracing(void);

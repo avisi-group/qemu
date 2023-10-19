@@ -62,10 +62,6 @@ impl Context {
     }
 
     pub fn received_exit(&self) -> bool {
-        if let Ok(Event::Exit) = self.rx.try_recv() {
-            true
-        } else {
-            false
-        }
+        matches!(self.rx.try_recv(), Ok(Event::Exit))
     }
 }
