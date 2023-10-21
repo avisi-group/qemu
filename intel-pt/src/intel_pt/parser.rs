@@ -10,7 +10,7 @@ use {
     },
     bbqueue::Consumer,
     libipt::{
-        packet::{Compression, Packet, PacketDecoder},
+        packet::{Packet, PacketDecoder},
         ConfigBuilder, PtErrorCode,
     },
     parking_lot::Mutex,
@@ -57,7 +57,6 @@ struct ParserState {
     consumer: Consumer<'static, BUFFER_SIZE>,
     queue: Arc<Mutex<BinaryHeap<ParsedData>>>,
     mode: Mode,
-    last_ip: u64,
     next_sequence_number: u64,
 }
 
@@ -75,7 +74,6 @@ impl ParserState {
             consumer,
             queue,
             mode,
-            last_ip: 0,
             next_sequence_number: 0,
         }
     }
@@ -114,29 +112,34 @@ impl ParserState {
                 }
             };
 
+            // copy data into local `Vec`
+            // TODO: heap allocation + memcpy might be expensive here, currently done to avoid issues with split read
             let mut data = read.bufs().0.to_owned();
             data.extend_from_slice(read.bufs().1);
             let len = read.combined_len();
 
+            // find the range of bytes alinged to sync points
             let range = match self.find_sync_range(&mut data) {
                 Ok(range) => range,
+                // found no sync points, skip?
+                // TODO: maybe panic here
                 Err(ParseError::NoSync) => {
-                    // found no sync points, skip
                     log::trace!("skipping {len}");
                     read.release(len);
                     continue;
                 }
+                // only find a single sync point
                 Err(ParseError::OneSync(start)) => {
                     if terminating {
                         // parse all remaining bytes even if there isn't a final sync point
                         log::trace!("parsing remaining bytes from {start}");
-                        self.parse_slice(&mut data[start..]);
-                        return;
+                        start..data.len()
+                    } else {
+                        // we don't have enough data so notify for more
+                        log::trace!("notify");
+                        self.empty_buffer_notifier.notify();
+                        continue;
                     }
-
-                    log::trace!("notify");
-                    self.empty_buffer_notifier.notify();
-                    continue;
                 }
             };
 
@@ -144,14 +147,23 @@ impl ParserState {
                 panic!();
             }
 
+            // now we can release all bytes up to that end point
             read.release(range.end);
-            assert_eq!(0, range.start);
+
+            // trim our local buffer to size
             data.truncate(range.end);
 
+            // not technically necessary, but since it always holds, not holding is probably a bug?
+            assert_eq!(0, range.start);
+
+            // cloning to move into the closure
             let queue = self.queue.clone();
+
             let sequence_number = self.next_sequence_number;
             self.next_sequence_number += 1;
+
             pool.spawn(move || {
+                // create a new decoder, synchronise it, and then assert that it synchronised to byte 0
                 let mut decoder =
                     PacketDecoder::new(&ConfigBuilder::new(&mut data).unwrap().finish()).unwrap();
                 decoder.sync_forward().unwrap();
@@ -161,13 +173,11 @@ impl ParserState {
 
                 loop {
                     match decoder.next() {
-                        Ok(p) => match p {
-                            Packet::Ptw(inner) => {
+                        Ok(p) => {
+                            if let Packet::Ptw(inner) = p {
                                 pcs.push(inner.payload());
                             }
-                            Packet::Tip(_) => {}
-                            _ => (),
-                        },
+                        }
                         Err(e) => {
                             if e.code() == PtErrorCode::Eos {
                                 log::trace!("reached eos");
@@ -180,17 +190,16 @@ impl ParserState {
                     }
                 }
 
+                // push data into queue to be picked up by writer
                 queue.lock().push(ParsedData {
                     sequence_number,
                     data: pcs,
                 });
             });
-
-            // log::trace!("parsing range {range:?}");
-            // self.parse_slice(&mut read.buf_mut()[range]);
         }
     }
 
+    /// Finds the syncpoints in the supplied slice, returned as a range containing up to `MAX_SYNCPOINTS` syncpoints
     fn find_sync_range(&mut self, slice: &mut [u8]) -> Result<Range<usize>, ParseError> {
         let Some(start) = find_next_sync(slice) else {
             // slice did not contain any sync points
@@ -224,67 +233,5 @@ impl ParserState {
         }
 
         Ok(syncpoints[0]..*syncpoints.last().unwrap())
-    }
-
-    ///
-    fn parse_slice(&mut self, slice: &mut [u8]) {
-        let mut decoder = PacketDecoder::new(&ConfigBuilder::new(slice).unwrap().finish()).unwrap();
-        decoder.sync_forward().unwrap();
-        assert_eq!(decoder.sync_offset().unwrap(), 0);
-
-        let mut pcs = vec![];
-
-        loop {
-            match decoder.next() {
-                Ok(p) => match self.mode {
-                    Mode::Tip => match p {
-                        Packet::Tip(inner) => {
-                            let ip = match inner.compression() {
-                                Compression::Suppressed => continue,
-                                Compression::Update16 => (self.last_ip >> 16) << 16 | inner.tip(),
-                                Compression::Update32 => (self.last_ip >> 32) << 32 | inner.tip(),
-                                Compression::Update48 => (self.last_ip >> 32) << 32 | inner.tip(),
-                                Compression::Sext48 => (((inner.tip() as i64) << 16) >> 16) as u64,
-                                Compression::Full => inner.tip(),
-                            };
-
-                            self.last_ip = ip;
-
-                            pcs.push(ip - 9);
-                        }
-                        _ => (),
-                    },
-                    Mode::Fup => todo!(),
-                    Mode::PtWrite => match p {
-                        Packet::Ptw(inner) => {
-                            pcs.push(inner.payload());
-                        }
-                        _ => (),
-                    },
-                    _ => unreachable!(),
-                },
-
-                Err(e) => {
-                    if e.code() == PtErrorCode::Eos {
-                        log::trace!("reached eos");
-                        break;
-                    } else {
-                        log::error!("packet error: {:?}", e);
-                        continue;
-                    }
-                }
-            }
-        }
-
-        self.send_data(pcs);
-    }
-
-    fn send_data(&mut self, data: Vec<u64>) {
-        self.queue.lock().push(ParsedData {
-            sequence_number: self.next_sequence_number,
-            data,
-        });
-
-        self.next_sequence_number += 1;
     }
 }
