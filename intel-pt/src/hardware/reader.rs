@@ -1,6 +1,6 @@
 use {
     crate::{
-        intel_pt::{
+        hardware::{
             ring_buffer::RingBuffer,
             thread_handle::{Context, ThreadHandle},
             BUFFER_SIZE,

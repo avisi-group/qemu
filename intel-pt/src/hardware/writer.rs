@@ -1,6 +1,6 @@
 use {
     crate::{
-        intel_pt::{
+        hardware::{
             thread_handle::{Context, ThreadHandle},
             ParsedData, SharedPcMap,
         },

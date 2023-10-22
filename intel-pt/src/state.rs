@@ -1,5 +1,5 @@
 use {
-    crate::{intel_pt::HardwareTracer, Mode, OUT_DIR},
+    crate::{hardware::HardwareTracer, Mode, OUT_DIR},
     parking_lot::{lock_api::RawMutex, Mutex},
     std::{
         fs::File,
@@ -38,7 +38,7 @@ impl State {
                 File::create(OUT_DIR.to_owned() + "simple.trace").unwrap(),
             )),
             Mode::Tip | Mode::Fup | Mode::PtWrite => {
-                InnerState::IntelPt(HardwareTracer::init(mode))
+                InnerState::Hardware(HardwareTracer::init(mode))
             }
             Mode::Uninitialized => unreachable!(),
         };
@@ -85,7 +85,7 @@ impl State {
     }
 
     pub fn pc_mapping(&self, host_pc: u64, guest_pc: u64) {
-        let InnerState::IntelPt(tracer) = &mut *self.inner.lock() else {
+        let InnerState::Hardware(tracer) = &mut *self.inner.lock() else {
             return;
         };
 
@@ -93,7 +93,7 @@ impl State {
     }
 
     pub fn start_recording(&self) {
-        let InnerState::IntelPt(tracer) = &mut *self.inner.lock() else {
+        let InnerState::Hardware(tracer) = &mut *self.inner.lock() else {
             return;
         };
 
@@ -101,7 +101,7 @@ impl State {
     }
 
     pub fn stop_recording(&self) {
-        let InnerState::IntelPt(tracer) = &mut *self.inner.lock() else {
+        let InnerState::Hardware(tracer) = &mut *self.inner.lock() else {
             return;
         };
 
@@ -112,7 +112,7 @@ impl State {
         match mem::take(&mut *self.inner.lock()) {
             InnerState::Uninitialized => (),
             InnerState::Simple(mut w) => w.flush().unwrap(),
-            InnerState::IntelPt(tracer) => tracer.exit(),
+            InnerState::Hardware(tracer) => tracer.exit(),
         }
     }
 }
@@ -120,7 +120,7 @@ impl State {
 enum InnerState {
     Uninitialized,
     Simple(BufWriter<File>),
-    IntelPt(HardwareTracer),
+    Hardware(HardwareTracer),
 }
 
 impl Default for InnerState {

@@ -1,6 +1,6 @@
 use {
     crate::{
-        intel_pt::{notify::Notify, parser::Parser, reader::Reader, writer::Writer},
+        hardware::{notify::Notify, parser::Parser, reader::Reader, writer::Writer},
         Mode, OUT_DIR,
     },
     bbqueue::BBBuffer,

@@ -1,6 +1,6 @@
 use {
     crate::{
-        intel_pt::{
+        hardware::{
             decoder::find_next_sync,
             notify::Notify,
             thread_handle::{Context, ThreadHandle},
