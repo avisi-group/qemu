@@ -1,10 +1,11 @@
+use crate::hardware::ordered_queue::Sender;
 use {
     crate::{
         hardware::{
             decoder::find_next_sync,
             notify::Notify,
             thread_handle::{Context, ThreadHandle},
-            ParsedData, BUFFER_SIZE,
+            BUFFER_SIZE,
         },
         Mode,
     },
@@ -13,9 +14,8 @@ use {
         packet::{Packet, PacketDecoder},
         ConfigBuilder, PtErrorCode,
     },
-    parking_lot::Mutex,
     rayon::ThreadPoolBuilder,
-    std::{collections::BinaryHeap, ops::Range, sync::Arc},
+    std::ops::Range,
 };
 
 const MAX_SYNCPOINTS: usize = 64;
@@ -29,7 +29,7 @@ impl Parser {
     pub fn init(
         notify: Notify,
         consumer: Consumer<'static, BUFFER_SIZE>,
-        queue: Arc<Mutex<BinaryHeap<ParsedData>>>,
+        queue: Sender<Vec<u64>>,
         mode: Mode,
     ) -> Self {
         Self {
@@ -55,7 +55,7 @@ struct ParserState {
     ctx: Context,
     empty_buffer_notifier: Notify,
     consumer: Consumer<'static, BUFFER_SIZE>,
-    queue: Arc<Mutex<BinaryHeap<ParsedData>>>,
+    queue: Sender<Vec<u64>>,
     mode: Mode,
     next_sequence_number: u64,
 }
@@ -65,7 +65,7 @@ impl ParserState {
         ctx: Context,
         empty_buffer_notifier: Notify,
         consumer: Consumer<'static, BUFFER_SIZE>,
-        queue: Arc<Mutex<BinaryHeap<ParsedData>>>,
+        queue: Sender<Vec<u64>>,
         mode: Mode,
     ) -> Self {
         Self {
@@ -173,11 +173,11 @@ impl ParserState {
 
                 loop {
                     match decoder.next() {
-                        Ok(p) => {
-                            if let Packet::Ptw(inner) = p {
-                                pcs.push(inner.payload());
-                            }
-                        }
+                        Ok(p) => match p {
+                            Packet::Ptw(inner) => pcs.push(inner.payload()),
+
+                            _ => (),
+                        },
                         Err(e) => {
                             if e.code() == PtErrorCode::Eos {
                                 log::trace!("reached eos");
@@ -191,10 +191,7 @@ impl ParserState {
                 }
 
                 // push data into queue to be picked up by writer
-                queue.lock().push(ParsedData {
-                    sequence_number,
-                    data: pcs,
-                });
+                queue.send(sequence_number, pcs);
             });
         }
     }
@@ -234,4 +231,10 @@ impl ParserState {
 
         Ok(syncpoints[0]..*syncpoints.last().unwrap())
     }
+}
+
+trait PacketHandler {
+    type Data;
+
+    fn new() {}
 }

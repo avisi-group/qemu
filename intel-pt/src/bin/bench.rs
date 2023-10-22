@@ -1,8 +1,9 @@
+use scribe::hardware::ordered_queue;
 use {
     bbqueue::BBBuffer,
     parking_lot::RwLock,
     scribe::{
-        intel_pt::{notify::Notify, parser::Parser, writer::Writer, BUFFER_SIZE},
+        hardware::{notify::Notify, parser::Parser, writer::Writer, BUFFER_SIZE},
         Mode,
     },
     std::{collections::HashMap, sync::Arc},
@@ -21,6 +22,7 @@ fn main() {
     let pc_map = Arc::new(RwLock::new(HashMap::default()));
     let (mut producer, consumer) = BUFFER.try_split().unwrap();
     let empty_buffer_notifier = Notify::new();
+    let (sender, receiver) = ordered_queue::new();
 
     {
         let mut wgr = producer.grant_exact(DATA.len()).unwrap();
@@ -28,8 +30,13 @@ fn main() {
         wgr.commit(DATA.len());
     }
 
-    let (writer, queue) = Writer::init("/home/fm208/data/intelpt.trace", pc_map, Mode::PtWrite);
-    let parser = Parser::init(empty_buffer_notifier, consumer, queue, Mode::PtWrite);
+    let writer = Writer::init(
+        "/home/fm208/data/intelpt.trace",
+        pc_map,
+        receiver,
+        Mode::PtWrite,
+    );
+    let parser = Parser::init(empty_buffer_notifier, consumer, sender, Mode::PtWrite);
 
     std::thread::sleep(std::time::Duration::from_millis(100));
 

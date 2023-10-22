@@ -18,6 +18,7 @@ use {
 
 pub mod decoder;
 pub mod notify;
+pub mod ordered_queue;
 pub mod parser;
 pub mod reader;
 pub mod ring_buffer;
@@ -83,10 +84,15 @@ impl HardwareTracer {
         let pc_map = Arc::new(RwLock::new(HashMap::default()));
         let (producer, consumer) = BUFFER.try_split().unwrap();
         let empty_buffer_notifier = Notify::new();
+        let (sender, receiver) = ordered_queue::new();
 
-        let (writer, queue) =
-            Writer::init(OUT_DIR.to_owned() + "intelpt.trace", pc_map.clone(), mode);
-        let parser = Parser::init(empty_buffer_notifier.clone(), consumer, queue, mode);
+        let writer = Writer::init(
+            OUT_DIR.to_owned() + "intelpt.trace",
+            pc_map.clone(),
+            receiver,
+            mode,
+        );
+        let parser = Parser::init(empty_buffer_notifier.clone(), consumer, sender, mode);
         let (reader, perf_file_descriptor) = Reader::init(producer, mode);
 
         Self {
@@ -118,30 +124,5 @@ impl HardwareTracer {
         reader.exit();
         parser.exit();
         writer.exit();
-    }
-}
-
-pub struct ParsedData {
-    pub sequence_number: u64,
-    pub data: Vec<u64>,
-}
-
-impl PartialEq for ParsedData {
-    fn eq(&self, other: &Self) -> bool {
-        self.sequence_number == other.sequence_number
-    }
-}
-
-impl Eq for ParsedData {}
-
-impl PartialOrd for ParsedData {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        other.sequence_number.partial_cmp(&self.sequence_number)
-    }
-}
-
-impl Ord for ParsedData {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        other.sequence_number.cmp(&self.sequence_number)
     }
 }
