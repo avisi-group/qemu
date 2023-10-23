@@ -1,7 +1,4 @@
-use {
-    libipt::{packet::PacketDecoder, ConfigBuilder},
-    std::{mem::size_of, slice},
-};
+use libipt::{packet::PacketDecoder, ConfigBuilder};
 
 const PT_OPC_PSB: u8 = 0x02;
 const PT_EXT_PSB: u8 = 0x82;
@@ -29,7 +26,7 @@ const PTPS_PSB: usize = PT_OPCS_PSB + PT_PL_PSB_SIZE;
 
 /// A psb packet contains a unique 2-byte repeating pattern, there are only two
 /// ways to fill up a u64 with such a pattern.
-const PSB_PATTERNS: [u64; 2] = [
+pub const PSB_PATTERNS: [u64; 2] = [
     ((PT_PSB_LOHI as u64)
         | (PT_PSB_LOHI as u64) << 16
         | (PT_PSB_LOHI as u64) << 32

@@ -32,7 +32,7 @@ type SharedPcMap = Arc<RwLock<HashMap<u64, u64, BuildHasherDefault<XxHash64>>>>;
 const _SYNC_POINTS_PER_JOB: usize = 32;
 
 /// Size of the Intel PT data buffer in bytes
-pub const BUFFER_SIZE: usize = 1024 * 1024 * 1024;
+pub const BUFFER_SIZE: usize = 256 * 1024 * 1024;
 
 static BUFFER: BBBuffer<BUFFER_SIZE> = BBBuffer::new();
 
