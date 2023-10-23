@@ -141,16 +141,14 @@ fn read_pt_data(
         let had_record = ring_buffer.next_record(|buf| {
             let mut grant = producer
                 .grant_exact(buf.len())
-                .expect(&format!("failed to grant {}", buf.len()));
+                .unwrap_or_else(|_| panic!("failed to grant {}", buf.len()));
             grant.buf().copy_from_slice(buf);
             grant.commit(buf.len());
         });
 
-        if !had_record {
-            if ctx.received_exit() {
-                log::trace!("read terminating");
-                return;
-            }
+        if !had_record && ctx.received_exit() {
+            log::trace!("read terminating");
+            return;
         }
     }
 }

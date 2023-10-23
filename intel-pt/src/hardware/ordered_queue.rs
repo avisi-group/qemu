@@ -1,7 +1,10 @@
-//! Data is parsed in parallel and so potentially out of order, threads push data into this queue and the writer reads ordered data out
+//! Data is parsed in parallel and so potentially out of order, threads push
+//! data into this queue and the writer reads ordered data out
 
-use parking_lot::Mutex;
-use std::{collections::BinaryHeap, sync::Arc};
+use {
+    parking_lot::Mutex,
+    std::{collections::BinaryHeap, sync::Arc},
+};
 
 /// Some payload of type `T` with an associated sequence number
 struct Sequenced<T> {
@@ -44,7 +47,6 @@ pub fn new<T: Send>() -> (Sender<T>, Receiver<T>) {
     )
 }
 
-#[derive(Clone)]
 pub struct Sender<T> {
     queue: Queue<T>,
 }
@@ -55,6 +57,14 @@ impl<T> Sender<T> {
             sequence_number,
             payload,
         })
+    }
+}
+
+impl<T> Clone for Sender<T> {
+    fn clone(&self) -> Self {
+        Self {
+            queue: self.queue.clone(),
+        }
     }
 }
 

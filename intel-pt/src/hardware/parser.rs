@@ -1,40 +1,34 @@
-use crate::hardware::ordered_queue::Sender;
 use {
-    crate::{
-        hardware::{
-            decoder::find_next_sync,
-            notify::Notify,
-            thread_handle::{Context, ThreadHandle},
-            BUFFER_SIZE,
-        },
-        Mode,
+    crate::hardware::{
+        decoder::find_next_sync,
+        notify::Notify,
+        ordered_queue::Sender,
+        thread_handle::{Context, ThreadHandle},
+        PacketHandler, BUFFER_SIZE,
     },
     bbqueue::Consumer,
-    libipt::{
-        packet::{Packet, PacketDecoder},
-        ConfigBuilder, PtErrorCode,
-    },
-    rayon::ThreadPoolBuilder,
-    std::ops::Range,
+    libipt::{packet::PacketDecoder, ConfigBuilder, PtErrorCode},
+    rayon::{ThreadPool, ThreadPoolBuilder},
+    std::{marker::PhantomData, ops::Range},
 };
 
 const MAX_SYNCPOINTS: usize = 64;
-const NUM_THREADS: usize = 8;
+const NUM_THREADS: usize = 6;
 
 pub struct Parser {
     handle: ThreadHandle,
 }
 
 impl Parser {
-    pub fn init(
+    pub fn init<P: PacketHandler>(
         notify: Notify,
         consumer: Consumer<'static, BUFFER_SIZE>,
-        queue: Sender<Vec<u64>>,
-        mode: Mode,
+        queue: Sender<Vec<P::ProcessedPacket>>,
     ) -> Self {
         Self {
             handle: ThreadHandle::spawn(move |ctx| {
-                ParserState::new(ctx, notify, consumer, queue, mode).run()
+                let mut state = ParserState::<P>::init(ctx, notify, consumer, queue);
+                state.run();
             }),
         }
     }
@@ -51,54 +45,56 @@ enum ParseError {
     OneSync(usize),
 }
 
-struct ParserState {
+struct ParserState<P: PacketHandler> {
     ctx: Context,
     empty_buffer_notifier: Notify,
     consumer: Consumer<'static, BUFFER_SIZE>,
-    queue: Sender<Vec<u64>>,
-    mode: Mode,
+    queue: Sender<Vec<P::ProcessedPacket>>,
     next_sequence_number: u64,
+    pool: ThreadPool,
+    terminating: bool,
+    _packet_handler: PhantomData<P>,
 }
 
-impl ParserState {
-    fn new(
+impl<P: PacketHandler> ParserState<P> {
+    fn init(
         ctx: Context,
         empty_buffer_notifier: Notify,
         consumer: Consumer<'static, BUFFER_SIZE>,
-        queue: Sender<Vec<u64>>,
-        mode: Mode,
+        queue: Sender<Vec<P::ProcessedPacket>>,
     ) -> Self {
-        Self {
+        let celf = Self {
             ctx,
             empty_buffer_notifier,
             consumer,
             queue,
-            mode,
+
             next_sequence_number: 0,
-        }
+            pool: ThreadPoolBuilder::new()
+                .num_threads(NUM_THREADS)
+                .build()
+                .unwrap(),
+            terminating: false,
+            _packet_handler: PhantomData,
+        };
+
+        celf.ctx.ready();
+
+        celf
     }
 
     fn run(&mut self) {
-        let mut terminating = false;
-
-        let pool = ThreadPoolBuilder::new()
-            .num_threads(NUM_THREADS)
-            .build()
-            .unwrap();
-
-        self.ctx.ready();
-
         loop {
             if self.ctx.received_exit() {
                 log::trace!("parse terminating");
-                terminating = true;
+                self.terminating = true;
             }
 
             // read data from consumer, checking for shutdown if empty
             let read = match self.consumer.split_read() {
                 Ok(read) => read,
                 Err(bbqueue::Error::InsufficientSize) => {
-                    if terminating {
+                    if self.terminating {
                         log::trace!("insufficient size, terminating");
                         return;
                     } else {
@@ -113,13 +109,14 @@ impl ParserState {
             };
 
             // copy data into local `Vec`
-            // TODO: heap allocation + memcpy might be expensive here, currently done to avoid issues with split read
+            // TODO: heap allocation + memcpy might be expensive here, currently done to
+            // avoid issues with split read
             let mut data = read.bufs().0.to_owned();
             data.extend_from_slice(read.bufs().1);
             let len = read.combined_len();
 
             // find the range of bytes alinged to sync points
-            let range = match self.find_sync_range(&mut data) {
+            let range = match find_sync_range(&mut data) {
                 Ok(range) => range,
                 // found no sync points, skip?
                 // TODO: maybe panic here
@@ -130,7 +127,7 @@ impl ParserState {
                 }
                 // only find a single sync point
                 Err(ParseError::OneSync(start)) => {
-                    if terminating {
+                    if self.terminating {
                         // parse all remaining bytes even if there isn't a final sync point
                         log::trace!("parsing remaining bytes from {start}");
                         start..data.len()
@@ -143,17 +140,14 @@ impl ParserState {
                 }
             };
 
-            if self.mode != Mode::PtWrite {
-                panic!();
-            }
-
             // now we can release all bytes up to that end point
             read.release(range.end);
 
             // trim our local buffer to size
             data.truncate(range.end);
 
-            // not technically necessary, but since it always holds, not holding is probably a bug?
+            // not technically necessary, but since it always holds, not holding is probably
+            // a bug?
             assert_eq!(0, range.start);
 
             // cloning to move into the closure
@@ -162,22 +156,19 @@ impl ParserState {
             let sequence_number = self.next_sequence_number;
             self.next_sequence_number += 1;
 
-            pool.spawn(move || {
-                // create a new decoder, synchronise it, and then assert that it synchronised to byte 0
+            self.pool.spawn(move || {
+                // create a new decoder, synchronise it, and then assert that it synchronised to
+                // byte 0
                 let mut decoder =
                     PacketDecoder::new(&ConfigBuilder::new(&mut data).unwrap().finish()).unwrap();
                 decoder.sync_forward().unwrap();
                 assert_eq!(decoder.sync_offset().unwrap(), 0);
 
-                let mut pcs = vec![];
+                let mut packet_handler = P::new();
 
                 loop {
                     match decoder.next() {
-                        Ok(p) => match p {
-                            Packet::Ptw(inner) => pcs.push(inner.payload()),
-
-                            _ => (),
-                        },
+                        Ok(p) => packet_handler.process_packet(p),
                         Err(e) => {
                             if e.code() == PtErrorCode::Eos {
                                 log::trace!("reached eos");
@@ -191,50 +182,45 @@ impl ParserState {
                 }
 
                 // push data into queue to be picked up by writer
-                queue.send(sequence_number, pcs);
+                queue.send(sequence_number, packet_handler.finish());
             });
         }
     }
-
-    /// Finds the syncpoints in the supplied slice, returned as a range containing up to `MAX_SYNCPOINTS` syncpoints
-    fn find_sync_range(&mut self, slice: &mut [u8]) -> Result<Range<usize>, ParseError> {
-        let Some(start) = find_next_sync(slice) else {
-            // slice did not contain any sync points
-            return Err(ParseError::NoSync);
-        };
-
-        let mut syncpoints = vec![start];
-
-        loop {
-            if syncpoints.len() == MAX_SYNCPOINTS {
-                break;
-            }
-
-            let last = syncpoints.last().unwrap();
-
-            if last + 1 >= slice.len() {
-                break;
-            }
-
-            match find_next_sync(&mut slice[last + 1..]) {
-                Some(syncpoint) => {
-                    syncpoints.push(syncpoint + last + 1);
-                }
-                None => break,
-            }
-        }
-
-        if syncpoints.len() == 1 {
-            // slice only contained a single sync point
-            return Err(ParseError::OneSync(syncpoints[0]));
-        }
-
-        Ok(syncpoints[0]..*syncpoints.last().unwrap())
-    }
 }
 
-trait PacketHandler {
-    type Data;
+/// Finds the syncpoints in the supplied slice, returned as a range
+/// containing up to `MAX_SYNCPOINTS` syncpoints
+fn find_sync_range(slice: &mut [u8]) -> Result<Range<usize>, ParseError> {
+    let Some(start) = find_next_sync(slice) else {
+        // slice did not contain any sync points
+        return Err(ParseError::NoSync);
+    };
 
-    fn new() {}
+    let mut syncpoints = vec![start];
+
+    loop {
+        if syncpoints.len() == MAX_SYNCPOINTS {
+            break;
+        }
+
+        let last = syncpoints.last().unwrap();
+
+        if last + 1 >= slice.len() {
+            break;
+        }
+
+        match find_next_sync(&mut slice[last + 1..]) {
+            Some(syncpoint) => {
+                syncpoints.push(syncpoint + last + 1);
+            }
+            None => break,
+        }
+    }
+
+    if syncpoints.len() == 1 {
+        // slice only contained a single sync point
+        return Err(ParseError::OneSync(syncpoints[0]));
+    }
+
+    Ok(syncpoints[0]..*syncpoints.last().unwrap())
 }
