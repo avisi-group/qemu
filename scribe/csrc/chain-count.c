@@ -1,4 +1,4 @@
-#include "intel-pt/csrc/chain-count.h"
+#include "scribe/csrc/chain-count.h"
 #include "qemu/osdep.h"
 
 static uint32_t *chain_count = NULL;

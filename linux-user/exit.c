@@ -22,7 +22,7 @@
 #include "qemu.h"
 #include "user-internals.h"
 #include "qemu/plugin.h"
-#include "intel-pt/bindings.h"
+#include "scribe/bindings.h"
 #ifdef CONFIG_GPROF
 #include <sys/gmon.h>
 #endif
@@ -42,5 +42,5 @@ void preexit_cleanup(CPUArchState *env, int code)
         gdb_exit(code);
         qemu_plugin_user_exit();
         perf_exit();
-        intel_pt_exit();
+        scribe_exit();
 }

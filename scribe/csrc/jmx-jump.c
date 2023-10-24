@@ -1,4 +1,4 @@
-#include "intel-pt/csrc/jmx-jump.h"
+#include "scribe/csrc/jmx-jump.h"
 
 
 uint8_t jmx_machine_code[] = {

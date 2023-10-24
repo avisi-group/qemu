@@ -34,7 +34,7 @@
 #include "qemu/atomic128.h"
 #include "fpu/softfloat.h"
 #include <zlib.h> /* For crc32 */
-#include "intel-pt/bindings.h"
+#include "scribe/bindings.h"
 
 /* C2.4.7 Multiply and divide */
 /* special cases for 0 and LLONG_MIN are mandated by the standard */
@@ -962,5 +962,5 @@ void HELPER(unaligned_access)(CPUARMState *env, uint64_t addr,
 }
 
 void HELPER(simple_trace)(uint64_t pc) {
-    intel_pt_trace_guest_pc(pc);
+    scribe_trace_guest_pc(pc);
 }

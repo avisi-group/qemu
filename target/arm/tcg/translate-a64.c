@@ -25,7 +25,7 @@
 #include "arm_ldst.h"
 #include "semihosting/semihost.h"
 #include "cpregs.h"
-#include "intel-pt/bindings.h"
+#include "scribe/bindings.h"
 
 static TCGv_i64 cpu_X[32];
 static TCGv_i64 cpu_pc;
@@ -13940,7 +13940,7 @@ static void aarch64_tr_init_disas_context(DisasContextBase *dcbase,
 
 static void aarch64_tr_tb_start(DisasContextBase *db, CPUState *cpu)
 {
-    if (intel_pt_simple_tracing()) {
+    if (scribe_simple_tracing()) {
         DisasContext *dc = container_of(db, DisasContext, base);
         gen_helper_simple_trace(tcg_constant_i64(dc->base.pc_next));
     }

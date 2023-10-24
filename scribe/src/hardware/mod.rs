@@ -95,7 +95,7 @@ impl HardwareTracer {
                 let (sender, receiver) = ordered_queue::new();
 
                 let writer = Writer::init::<TipDecoder, _>(
-                    OUT_DIR.to_owned() + "intelpt.trace",
+                    OUT_DIR.to_owned() + "tip.trace",
                     pc_map.clone(),
                     receiver,
                 );
@@ -118,7 +118,7 @@ impl HardwareTracer {
                 let (sender, receiver) = ordered_queue::new();
 
                 let writer = Writer::init::<PtwriteHandler, _>(
-                    OUT_DIR.to_owned() + "intelpt.trace",
+                    OUT_DIR.to_owned() + "ptwrite.trace",
                     (),
                     receiver,
                 );

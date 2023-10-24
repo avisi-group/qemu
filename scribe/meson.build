@@ -28,7 +28,7 @@ cargo_objects = run_command(get_objects, env : env, check: true).stdout().strip(
 message('Found objects:')
 message(cargo_objects)
 
-intel_pt_header = files('bindings.h')
+scribe_header = files('bindings.h')
 
 intel_pt = declare_dependency(
   include_directories : include_directories('.'),

@@ -24,8 +24,8 @@
 
 #include "../tcg-ldst.c.inc"
 #include "../tcg-pool.c.inc"
-#include "intel-pt/csrc/chain-count.h"
-#include "intel-pt/bindings.h"
+#include "scribe/csrc/chain-count.h"
+#include "scribe/bindings.h"
 
 #ifdef CONFIG_DEBUG_TCG
 static const char * const tcg_target_reg_names[TCG_TARGET_NB_REGS] = {
@@ -2349,7 +2349,7 @@ static void tcg_out_goto_tb(TCGContext *s, int which)
 {
     tcg_insn_unit *patch_ptr = NULL;
 
-    if (intel_pt_insert_chain_count_check()) {
+    if (scribe_insert_chain_count_check()) {
         for (int i = 0; i < chain_count_machine_code_length; ++i) {
             tcg_out8(s, chain_count_machine_code[i]);
         }
@@ -2372,7 +2372,7 @@ static void tcg_out_goto_tb(TCGContext *s, int which)
     tcg_out32(s, 0);
     set_jmp_reset_offset(s, which);
 
-    if (intel_pt_insert_chain_count_check()) {
+    if (scribe_insert_chain_count_check()) {
         tcg_insn_unit *curr_ptr = s->code_ptr;
         s->code_ptr = patch_ptr;
         int32_t val = curr_ptr - patch_ptr;

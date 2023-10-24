@@ -1,5 +1,4 @@
-#ifndef INTEL_PT__CHAIN_COUNT_H_
-#define INTEL_PT__CHAIN_COUNT_H_
+#pragma once
 
 #include "qemu/osdep.h"
 
@@ -9,5 +8,3 @@ void zero_chain_count(void);
 
 extern uint8_t chain_count_machine_code[];
 extern unsigned int chain_count_machine_code_length;
-
-#endif
