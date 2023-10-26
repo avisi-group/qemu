@@ -9,8 +9,8 @@ use {
     bbqueue::Consumer,
     crossbeam::sync::WaitGroup,
     libipt::{packet::PacketDecoder, ConfigBuilder, PtErrorCode},
-    rayon::{ThreadPool, ThreadPoolBuilder},
-    std::{marker::PhantomData, ops::Range},
+    rayon::ThreadPoolBuilder,
+    std::ops::Range,
 };
 
 const MAX_SYNCPOINTS: usize = 64;
@@ -29,14 +29,13 @@ impl Parser {
     ) -> Self {
         Self {
             handle: ThreadHandle::spawn(move |ctx| {
-                let mut state = ParserState::<P>::init(
+                run_parser::<P>(
                     ctx,
                     empty_buffer_notifier,
                     writer_ready_notifier,
                     consumer,
                     queue,
                 );
-                state.run();
             }),
         }
     }
@@ -53,161 +52,134 @@ enum ParseError {
     OneSync(usize),
 }
 
-struct ParserState<P: PacketHandler> {
+fn run_parser<P: PacketHandler>(
     ctx: Context,
     empty_buffer_notifier: Notify,
     writer_ready_notifier: Notify,
-    consumer: Consumer<'static, BUFFER_SIZE>,
+    mut consumer: Consumer<'static, BUFFER_SIZE>,
     queue: Sender<Vec<P::ProcessedPacket>>,
-    next_sequence_number: u64,
-    pool: ThreadPool,
-    terminating: bool,
-    _packet_handler: PhantomData<P>,
-    writer_ready_counter: u8,
-}
+) {
+    let mut next_sequence_number = 0;
 
-impl<P: PacketHandler> ParserState<P> {
-    fn init(
-        ctx: Context,
-        empty_buffer_notifier: Notify,
-        writer_ready_notifier: Notify,
-        consumer: Consumer<'static, BUFFER_SIZE>,
-        queue: Sender<Vec<P::ProcessedPacket>>,
-    ) -> Self {
-        let celf = Self {
-            ctx,
-            empty_buffer_notifier,
-            writer_ready_notifier,
-            consumer,
-            queue,
+    let pool = ThreadPoolBuilder::new()
+        .num_threads(NUM_THREADS)
+        .build()
+        .unwrap();
 
-            next_sequence_number: 0,
-            pool: ThreadPoolBuilder::new()
-                .num_threads(NUM_THREADS)
-                .build()
-                .unwrap(),
-            terminating: false,
-            _packet_handler: PhantomData,
-            writer_ready_counter: 0,
+    let mut terminating = false;
+
+    let wait_group = WaitGroup::new();
+
+    ctx.ready();
+
+    loop {
+        if ctx.received_exit() {
+            log::trace!("parse terminating");
+            terminating = true;
+        }
+
+        // read data from consumer, checking for shutdown if empty
+        let read = match consumer.split_read() {
+            Ok(read) => read,
+            Err(bbqueue::Error::InsufficientSize) => {
+                if terminating {
+                    log::trace!("insufficient size, terminating");
+                    wait_group.wait();
+                    return;
+                } else {
+                    log::trace!("notify");
+                    empty_buffer_notifier.notify();
+                    continue;
+                }
+            }
+            Err(e) => {
+                log::trace!("error from split_read: {:?}", e);
+                continue;
+            }
         };
 
-        celf.ctx.ready();
+        writer_ready_notifier.wait();
 
-        celf
-    }
+        // copy data into local `Vec`
+        // TODO: heap allocation + memcpy might be expensive here, currently done to
+        // avoid issues with split read
+        let mut data = read.bufs().0.to_owned();
+        data.extend_from_slice(read.bufs().1);
+        let len = read.combined_len();
 
-    fn run(&mut self) {
-        let mut wg = WaitGroup::new();
-
-        loop {
-            if self.ctx.received_exit() {
-                log::trace!("parse terminating");
-                self.terminating = true;
+        // find the range of bytes alinged to sync points
+        let range = match find_sync_range(&mut data) {
+            Ok(range) => range,
+            // found no sync points, skip?
+            // TODO: maybe panic here
+            Err(ParseError::NoSync) => {
+                log::trace!("skipping {len}");
+                read.release(len);
+                continue;
             }
-
-            // read data from consumer, checking for shutdown if empty
-            let read = match self.consumer.split_read() {
-                Ok(read) => read,
-                Err(bbqueue::Error::InsufficientSize) => {
-                    if self.terminating {
-                        log::trace!("insufficient size, terminating");
-                        wg.wait();
-                        return;
-                    } else {
-                        log::trace!("notify");
-                        self.empty_buffer_notifier.notify();
-                        continue;
-                    }
-                }
-                Err(e) => {
-                    log::trace!("error from split_read: {:?}", e);
+            // only find a single sync point
+            Err(ParseError::OneSync(start)) => {
+                if terminating {
+                    // parse all remaining bytes even if there isn't a final sync point
+                    log::trace!("parsing remaining bytes from {start}");
+                    start..data.len()
+                } else {
+                    // we don't have enough data so notify for more
+                    log::trace!("notify");
+                    empty_buffer_notifier.notify();
                     continue;
                 }
-            };
+            }
+        };
 
-            self.writer_ready_notifier.wait();
+        // now we can release all bytes up to that end point
+        read.release(range.end);
 
-            // copy data into local `Vec`
-            // TODO: heap allocation + memcpy might be expensive here, currently done to
-            // avoid issues with split read
-            let mut data = read.bufs().0.to_owned();
-            data.extend_from_slice(read.bufs().1);
-            let len = read.combined_len();
+        // trim our local buffer to size
+        data.truncate(range.end);
 
-            // find the range of bytes alinged to sync points
-            let range = match find_sync_range(&mut data) {
-                Ok(range) => range,
-                // found no sync points, skip?
-                // TODO: maybe panic here
-                Err(ParseError::NoSync) => {
-                    log::trace!("skipping {len}");
-                    read.release(len);
-                    continue;
-                }
-                // only find a single sync point
-                Err(ParseError::OneSync(start)) => {
-                    if self.terminating {
-                        // parse all remaining bytes even if there isn't a final sync point
-                        log::trace!("parsing remaining bytes from {start}");
-                        start..data.len()
-                    } else {
-                        // we don't have enough data so notify for more
-                        log::trace!("notify");
-                        self.empty_buffer_notifier.notify();
-                        continue;
-                    }
-                }
-            };
+        // not technically necessary, but since it always holds, not holding is probably
+        // a bug?
+        assert_eq!(0, range.start);
 
-            // now we can release all bytes up to that end point
-            read.release(range.end);
+        // cloning to move into the closure
+        let queue = queue.clone();
 
-            // trim our local buffer to size
-            data.truncate(range.end);
+        let sequence_number = next_sequence_number;
+        next_sequence_number += 1;
 
-            // not technically necessary, but since it always holds, not holding is probably
-            // a bug?
-            assert_eq!(0, range.start);
+        let wg_cloned = wait_group.clone();
 
-            // cloning to move into the closure
-            let queue = self.queue.clone();
+        pool.spawn(move || {
+            // create a new decoder, synchronise it, and then assert that it synchronised to
+            // byte 0
+            let mut decoder =
+                PacketDecoder::new(&ConfigBuilder::new(&mut data).unwrap().finish()).unwrap();
+            decoder.sync_forward().unwrap();
+            assert_eq!(decoder.sync_offset().unwrap(), 0);
 
-            let sequence_number = self.next_sequence_number;
-            self.next_sequence_number += 1;
+            let mut packet_handler = P::new();
 
-            let wg_cloned = wg.clone();
-
-            self.pool.spawn(move || {
-                // create a new decoder, synchronise it, and then assert that it synchronised to
-                // byte 0
-                let mut decoder =
-                    PacketDecoder::new(&ConfigBuilder::new(&mut data).unwrap().finish()).unwrap();
-                decoder.sync_forward().unwrap();
-                assert_eq!(decoder.sync_offset().unwrap(), 0);
-
-                let mut packet_handler = P::new();
-
-                loop {
-                    match decoder.next() {
-                        Ok(p) => packet_handler.process_packet(p),
-                        Err(e) => {
-                            if e.code() == PtErrorCode::Eos {
-                                log::trace!("reached eos");
-                                break;
-                            } else {
-                                log::error!("packet error: {:?}", e);
-                                continue;
-                            }
+            loop {
+                match decoder.next() {
+                    Ok(p) => packet_handler.process_packet(p),
+                    Err(e) => {
+                        if e.code() == PtErrorCode::Eos {
+                            log::trace!("reached eos");
+                            break;
+                        } else {
+                            log::error!("packet error: {:?}", e);
+                            continue;
                         }
                     }
                 }
+            }
 
-                // push data into queue to be picked up by writer
-                queue.send(sequence_number, packet_handler.finish());
+            // push data into queue to be picked up by writer
+            queue.send(sequence_number, packet_handler.finish());
 
-                drop(wg_cloned);
-            });
-        }
+            drop(wg_cloned);
+        });
     }
 }
 
