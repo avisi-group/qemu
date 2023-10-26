@@ -60,13 +60,12 @@ fn run_parser<P: PacketHandler>(
     queue: Sender<Vec<P::ProcessedPacket>>,
 ) {
     let mut next_sequence_number = 0;
+    let mut terminating = false;
 
     let pool = ThreadPoolBuilder::new()
         .num_threads(NUM_THREADS)
         .build()
         .unwrap();
-
-    let mut terminating = false;
 
     let wait_group = WaitGroup::new();
 
@@ -98,7 +97,10 @@ fn run_parser<P: PacketHandler>(
             }
         };
 
-        writer_ready_notifier.wait();
+        // wait every 16 spawns
+        if next_sequence_number % 16 == 0 {
+            writer_ready_notifier.wait();
+        }
 
         // copy data into local `Vec`
         // TODO: heap allocation + memcpy might be expensive here, currently done to
