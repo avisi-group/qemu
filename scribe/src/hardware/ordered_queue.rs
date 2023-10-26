@@ -91,4 +91,8 @@ impl<T> Receiver<T> {
             None
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.queue.lock().is_empty()
+    }
 }

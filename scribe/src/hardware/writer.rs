@@ -1,3 +1,5 @@
+use crate::hardware::notify::Notify;
+
 use {
     crate::hardware::{
         ordered_queue::Receiver,
@@ -20,11 +22,15 @@ impl Writer {
         path: PATH,
         handler_context: P::Ctx,
         queue: Receiver<Vec<P::ProcessedPacket>>,
-    ) -> Self {
+        ready_notifier: Notify,
+    ) -> Self
+    where
+        <P as ProcessedPacketHandler>::ProcessedPacket: std::fmt::Debug,
+    {
         let writer = BufWriter::new(File::create(path).unwrap());
 
         let handle = ThreadHandle::spawn(move |thread_ctx| {
-            write_pt_data::<P, _>(thread_ctx, writer, queue, handler_context)
+            write_pt_data::<P, _>(thread_ctx, writer, queue, handler_context, ready_notifier)
         });
 
         Self { handle }
@@ -40,7 +46,10 @@ fn write_pt_data<P: ProcessedPacketHandler, W: Write>(
     mut w: W,
     mut queue: Receiver<Vec<P::ProcessedPacket>>,
     handler_ctx: P::Ctx,
-) {
+    ready_notifier: Notify,
+) where
+    <P as ProcessedPacketHandler>::ProcessedPacket: std::fmt::Debug,
+{
     log::trace!("starting");
 
     let mut handler = P::new(handler_ctx);
@@ -50,10 +59,14 @@ fn write_pt_data<P: ProcessedPacketHandler, W: Write>(
     loop {
         let Some(data) = queue.recv() else {
             if thread_ctx.received_exit() {
-                log::trace!("writer terminating");
+                log::info!("writer terminating");
+                assert!(queue.is_empty());
                 w.flush().unwrap();
                 return;
             };
+
+            ready_notifier.notify();
+
             continue;
         };
 

@@ -7,6 +7,7 @@ use {
         PacketHandler, BUFFER_SIZE,
     },
     bbqueue::Consumer,
+    crossbeam::sync::WaitGroup,
     libipt::{packet::PacketDecoder, ConfigBuilder, PtErrorCode},
     rayon::{ThreadPool, ThreadPoolBuilder},
     std::{marker::PhantomData, ops::Range},
@@ -21,13 +22,20 @@ pub struct Parser {
 
 impl Parser {
     pub fn init<P: PacketHandler>(
-        notify: Notify,
+        empty_buffer_notifier: Notify,
+        writer_ready_notifier: Notify,
         consumer: Consumer<'static, BUFFER_SIZE>,
         queue: Sender<Vec<P::ProcessedPacket>>,
     ) -> Self {
         Self {
             handle: ThreadHandle::spawn(move |ctx| {
-                let mut state = ParserState::<P>::init(ctx, notify, consumer, queue);
+                let mut state = ParserState::<P>::init(
+                    ctx,
+                    empty_buffer_notifier,
+                    writer_ready_notifier,
+                    consumer,
+                    queue,
+                );
                 state.run();
             }),
         }
@@ -48,24 +56,28 @@ enum ParseError {
 struct ParserState<P: PacketHandler> {
     ctx: Context,
     empty_buffer_notifier: Notify,
+    writer_ready_notifier: Notify,
     consumer: Consumer<'static, BUFFER_SIZE>,
     queue: Sender<Vec<P::ProcessedPacket>>,
     next_sequence_number: u64,
     pool: ThreadPool,
     terminating: bool,
     _packet_handler: PhantomData<P>,
+    writer_ready_counter: u8,
 }
 
 impl<P: PacketHandler> ParserState<P> {
     fn init(
         ctx: Context,
         empty_buffer_notifier: Notify,
+        writer_ready_notifier: Notify,
         consumer: Consumer<'static, BUFFER_SIZE>,
         queue: Sender<Vec<P::ProcessedPacket>>,
     ) -> Self {
         let celf = Self {
             ctx,
             empty_buffer_notifier,
+            writer_ready_notifier,
             consumer,
             queue,
 
@@ -76,6 +88,7 @@ impl<P: PacketHandler> ParserState<P> {
                 .unwrap(),
             terminating: false,
             _packet_handler: PhantomData,
+            writer_ready_counter: 0,
         };
 
         celf.ctx.ready();
@@ -84,6 +97,8 @@ impl<P: PacketHandler> ParserState<P> {
     }
 
     fn run(&mut self) {
+        let mut wg = WaitGroup::new();
+
         loop {
             if self.ctx.received_exit() {
                 log::trace!("parse terminating");
@@ -96,6 +111,7 @@ impl<P: PacketHandler> ParserState<P> {
                 Err(bbqueue::Error::InsufficientSize) => {
                     if self.terminating {
                         log::trace!("insufficient size, terminating");
+                        wg.wait();
                         return;
                     } else {
                         log::trace!("notify");
@@ -103,10 +119,13 @@ impl<P: PacketHandler> ParserState<P> {
                         continue;
                     }
                 }
-                Err(_) => {
+                Err(e) => {
+                    log::trace!("error from split_read: {:?}", e);
                     continue;
                 }
             };
+
+            self.writer_ready_notifier.wait();
 
             // copy data into local `Vec`
             // TODO: heap allocation + memcpy might be expensive here, currently done to
@@ -156,6 +175,8 @@ impl<P: PacketHandler> ParserState<P> {
             let sequence_number = self.next_sequence_number;
             self.next_sequence_number += 1;
 
+            let wg_cloned = wg.clone();
+
             self.pool.spawn(move || {
                 // create a new decoder, synchronise it, and then assert that it synchronised to
                 // byte 0
@@ -183,6 +204,8 @@ impl<P: PacketHandler> ParserState<P> {
 
                 // push data into queue to be picked up by writer
                 queue.send(sequence_number, packet_handler.finish());
+
+                drop(wg_cloned);
             });
         }
     }

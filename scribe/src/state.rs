@@ -1,8 +1,8 @@
-use std::env::current_dir;
 use {
     crate::{hardware::HardwareTracer, Mode},
     parking_lot::{lock_api::RawMutex, Mutex},
     std::{
+        env::current_dir,
         fs::File,
         io::{BufWriter, Write},
         mem,

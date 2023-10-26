@@ -1,4 +1,3 @@
-use std::env::current_dir;
 use {
     crate::{
         hardware::{notify::Notify, parser::Parser, reader::Reader, writer::Writer},
@@ -9,6 +8,7 @@ use {
     parking_lot::RwLock,
     std::{
         collections::HashMap,
+        env::current_dir,
         hash::BuildHasherDefault,
         sync::{
             atomic::{AtomicI32, Ordering},
@@ -91,27 +91,30 @@ impl HardwareTracer {
         match mode {
             Mode::Uninitialized | Mode::Simple => unreachable!(),
             Mode::Tip => {
-                let pc_map = Arc::new(RwLock::new(HashMap::default()));
+                // let pc_map = Arc::new(RwLock::new(HashMap::default()));
 
-                let (sender, receiver) = ordered_queue::new();
+                // let (sender, receiver) = ordered_queue::new();
 
-                let mut trace_path = current_dir().unwrap();
-                trace_path.push("tip.trace");
+                // let mut trace_path = current_dir().unwrap();
+                // trace_path.push("tip.trace");
 
-                let writer = Writer::init::<TipDecoder, _>(trace_path, pc_map.clone(), receiver);
+                // let writer = Writer::init::<TipDecoder, _>(trace_path, pc_map.clone(),
+                // receiver);
 
-                let parser =
-                    Parser::init::<TipHandler>(empty_buffer_notifier.clone(), consumer, sender);
-                let (reader, perf_file_descriptor) = Reader::init(producer, mode);
+                // let parser =
+                //     Parser::init::<TipHandler>(empty_buffer_notifier.clone(), consumer,
+                // sender); let (reader, perf_file_descriptor) =
+                // Reader::init(producer, mode);
 
-                Self {
-                    perf_file_descriptor,
-                    pc_map: Some(pc_map),
-                    empty_buffer_notifier,
-                    reader,
-                    parser,
-                    writer,
-                }
+                // Self {
+                //     perf_file_descriptor,
+                //     pc_map: Some(pc_map),
+                //     empty_buffer_notifier,
+                //     reader,
+                //     parser,
+                //     writer,
+                // }
+                todo!()
             }
             Mode::Fup => todo!(),
             Mode::PtWrite => {
@@ -120,10 +123,22 @@ impl HardwareTracer {
                 let mut trace_path = current_dir().unwrap();
                 trace_path.push("ptw.trace");
 
-                let writer = Writer::init::<PtwriteHandler, _>(trace_path, (), receiver);
+                let writer_ready_notifier = Notify::new();
 
-                let parser =
-                    Parser::init::<PtwriteHandler>(empty_buffer_notifier.clone(), consumer, sender);
+                let writer = Writer::init::<PtwriteHandler, _>(
+                    trace_path,
+                    (),
+                    receiver,
+                    writer_ready_notifier.clone(),
+                );
+
+                let parser = Parser::init::<PtwriteHandler>(
+                    empty_buffer_notifier.clone(),
+                    writer_ready_notifier,
+                    consumer,
+                    sender,
+                );
+
                 let (reader, perf_file_descriptor) = Reader::init(producer, mode);
 
                 Self {
@@ -162,7 +177,7 @@ impl HardwareTracer {
 
 /// Processes packets
 pub trait PacketHandler {
-    type ProcessedPacket: Send + 'static;
+    type ProcessedPacket: Send + 'static + std::fmt::Debug;
 
     fn new() -> Self;
 
@@ -216,6 +231,7 @@ impl ProcessedPacketHandler for PtwriteHandler {
     }
 }
 
+#[derive(Debug)]
 enum Compression {
     /// Payload: 16 bits. Update last IP
     Update16,
