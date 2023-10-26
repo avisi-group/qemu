@@ -83,6 +83,7 @@ fn run_parser<P: PacketHandler>(
             Err(bbqueue::Error::InsufficientSize) => {
                 if terminating {
                     log::trace!("insufficient size, terminating");
+                    writer_ready_notifier.wait();
                     wait_group.wait();
                     return;
                 } else {
