@@ -1,5 +1,6 @@
+use std::env::current_dir;
 use {
-    crate::{hardware::HardwareTracer, Mode, OUT_DIR},
+    crate::{hardware::HardwareTracer, Mode},
     parking_lot::{lock_api::RawMutex, Mutex},
     std::{
         fs::File,
@@ -33,10 +34,12 @@ impl State {
             .expect("unrecognized command line argument");
 
         *self.inner.lock() = match mode {
-            Mode::Simple => InnerState::Simple(BufWriter::with_capacity(
-                8 * 1024 * 1024,
-                File::create(OUT_DIR.to_owned() + "simple.trace").unwrap(),
-            )),
+            Mode::Simple => {
+                let mut trace_path = current_dir().unwrap();
+                trace_path.push("simple.trace");
+
+                InnerState::Simple(BufWriter::new(File::create(trace_path).unwrap()))
+            }
             Mode::Tip | Mode::Fup | Mode::PtWrite => {
                 InnerState::Hardware(HardwareTracer::init(mode))
             }

@@ -21,7 +21,7 @@ impl Writer {
         handler_context: P::Ctx,
         queue: Receiver<Vec<P::ProcessedPacket>>,
     ) -> Self {
-        let writer = BufWriter::with_capacity(8 * 1024, File::create(path).unwrap());
+        let writer = BufWriter::new(File::create(path).unwrap());
 
         let handle = ThreadHandle::spawn(move |thread_ctx| {
             write_pt_data::<P, _>(thread_ctx, writer, queue, handler_context)

@@ -4,8 +4,6 @@ pub mod ffi;
 pub mod hardware;
 pub mod state;
 
-const OUT_DIR: &str = "/home/fm208/data/";
-
 static STATE: State = State::new();
 
 /// Tracing mode
@@ -45,7 +43,7 @@ impl FromStr for Mode {
             "simple" => Ok(Mode::Simple),
             "tip" => Ok(Mode::Tip),
             "fup" => Ok(Mode::Fup),
-            "ptwrite" => Ok(Mode::PtWrite),
+            "ptw" => Ok(Mode::PtWrite),
             _ => Err(s.to_owned()),
         }
     }

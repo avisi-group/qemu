@@ -1,7 +1,8 @@
+use std::env::current_dir;
 use {
     crate::{
         hardware::{notify::Notify, parser::Parser, reader::Reader, writer::Writer},
-        Mode, OUT_DIR,
+        Mode,
     },
     bbqueue::BBBuffer,
     libipt::packet::Packet,
@@ -94,11 +95,10 @@ impl HardwareTracer {
 
                 let (sender, receiver) = ordered_queue::new();
 
-                let writer = Writer::init::<TipDecoder, _>(
-                    OUT_DIR.to_owned() + "tip.trace",
-                    pc_map.clone(),
-                    receiver,
-                );
+                let mut trace_path = current_dir().unwrap();
+                trace_path.push("tip.trace");
+
+                let writer = Writer::init::<TipDecoder, _>(trace_path, pc_map.clone(), receiver);
 
                 let parser =
                     Parser::init::<TipHandler>(empty_buffer_notifier.clone(), consumer, sender);
@@ -117,11 +117,10 @@ impl HardwareTracer {
             Mode::PtWrite => {
                 let (sender, receiver) = ordered_queue::new();
 
-                let writer = Writer::init::<PtwriteHandler, _>(
-                    OUT_DIR.to_owned() + "ptwrite.trace",
-                    (),
-                    receiver,
-                );
+                let mut trace_path = current_dir().unwrap();
+                trace_path.push("ptw.trace");
+
+                let writer = Writer::init::<PtwriteHandler, _>(trace_path, (), receiver);
 
                 let parser =
                     Parser::init::<PtwriteHandler>(empty_buffer_notifier.clone(), consumer, sender);
