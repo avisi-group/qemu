@@ -23,10 +23,7 @@ impl Writer {
         handler_context: P::Ctx,
         queue: Receiver<Vec<P::ProcessedPacket>>,
         ready_notifier: Notify,
-    ) -> Self
-    where
-        <P as ProcessedPacketHandler>::ProcessedPacket: std::fmt::Debug,
-    {
+    ) -> Self {
         let writer = BufWriter::new(File::create(path).unwrap());
 
         let handle = ThreadHandle::spawn(move |thread_ctx| {
@@ -47,9 +44,7 @@ fn write_pt_data<P: ProcessedPacketHandler, W: Write>(
     mut queue: Receiver<Vec<P::ProcessedPacket>>,
     handler_ctx: P::Ctx,
     ready_notifier: Notify,
-) where
-    <P as ProcessedPacketHandler>::ProcessedPacket: std::fmt::Debug,
-{
+) {
     log::trace!("starting");
 
     let mut handler = P::new(handler_ctx);

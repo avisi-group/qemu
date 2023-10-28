@@ -2,7 +2,6 @@ use {
     crate::{hardware::HardwareTracer, Mode},
     parking_lot::{lock_api::RawMutex, Mutex},
     std::{
-        env::current_dir,
         fs::File,
         io::{BufWriter, Write},
         mem,
@@ -35,8 +34,7 @@ impl State {
 
         *self.inner.lock() = match mode {
             Mode::Simple => {
-                let mut trace_path = current_dir().unwrap();
-                trace_path.push("simple.trace");
+                let trace_path = "/mnt/ram/simple.trace";
 
                 InnerState::Simple(BufWriter::new(File::create(trace_path).unwrap()))
             }

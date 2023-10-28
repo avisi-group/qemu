@@ -25,7 +25,6 @@ log = { version = "0.4.20", features = ["release_max_level_info"] }
 bbqueue = "0.5.1"
 color-eyre = "0.6.2"
 rayon = "1.8.0"
-crossbeam = "0.8.2"
 
 [build-dependencies]
 cbindgen = "0.26.0"

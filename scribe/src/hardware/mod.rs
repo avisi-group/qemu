@@ -8,7 +8,6 @@ use {
     parking_lot::RwLock,
     std::{
         collections::HashMap,
-        env::current_dir,
         hash::BuildHasherDefault,
         sync::{
             atomic::{AtomicI32, Ordering},
@@ -120,19 +119,18 @@ impl HardwareTracer {
             Mode::PtWrite => {
                 let (sender, receiver) = ordered_queue::new();
 
-                let mut trace_path = current_dir().unwrap();
-                trace_path.push("ptw.trace");
+                let trace_path = "/mnt/ram/ptw.trace";
 
                 let writer_ready_notifier = Notify::new();
 
-                let writer = Writer::init::<PtwriteHandler, _>(
+                let writer = Writer::init::<PtwDecoder, _>(
                     trace_path,
                     (),
                     receiver,
                     writer_ready_notifier.clone(),
                 );
 
-                let parser = Parser::init::<PtwriteHandler>(
+                let parser = Parser::init::<PtwHandler>(
                     empty_buffer_notifier.clone(),
                     writer_ready_notifier,
                     consumer,
@@ -196,11 +194,11 @@ pub trait ProcessedPacketHandler {
     fn calculate_pc(&mut self, data: Self::ProcessedPacket) -> Option<u64>;
 }
 
-struct PtwriteHandler {
+struct PtwHandler {
     buf: Vec<u64>,
 }
 
-impl PacketHandler for PtwriteHandler {
+impl PacketHandler for PtwHandler {
     type ProcessedPacket = u64;
 
     fn new() -> Self {
@@ -218,12 +216,14 @@ impl PacketHandler for PtwriteHandler {
     }
 }
 
-impl ProcessedPacketHandler for PtwriteHandler {
+struct PtwDecoder;
+
+impl ProcessedPacketHandler for PtwDecoder {
     type ProcessedPacket = u64;
     type Ctx = ();
 
     fn new(_: Self::Ctx) -> Self {
-        Self { buf: Vec::new() }
+        Self
     }
 
     fn calculate_pc(&mut self, data: Self::ProcessedPacket) -> Option<u64> {
