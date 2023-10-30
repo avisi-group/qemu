@@ -1,4 +1,3 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
 use {
     crate::hardware::{
         decoder::find_next_sync,
@@ -10,7 +9,13 @@ use {
     bbqueue::Consumer,
     libipt::{packet::PacketDecoder, ConfigBuilder, PtErrorCode},
     rayon::ThreadPoolBuilder,
-    std::{ops::Range, sync::Arc},
+    std::{
+        ops::Range,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
+    },
 };
 
 /// Number of Intel PT synchronisation points included in each work item

@@ -9,6 +9,7 @@ use {
     std::{
         collections::HashMap,
         hash::BuildHasherDefault,
+        path::PathBuf,
         sync::{
             atomic::{AtomicI32, Ordering},
             Arc,
@@ -83,7 +84,7 @@ impl HardwareTracer {
         }
     }
 
-    pub fn init(mode: Mode) -> Self {
+    pub fn init(mode: Mode, path: PathBuf) -> Self {
         let (producer, consumer) = BUFFER.try_split().unwrap();
         let empty_buffer_notifier = Notify::new();
 
@@ -119,7 +120,7 @@ impl HardwareTracer {
             Mode::PtWrite => {
                 let (sender, receiver) = ordered_queue::new();
 
-                let trace_path = "/mnt/ram/ptw.trace";
+                let trace_path = path.join("ptw.trace");
 
                 let writer_ready_notifier = Notify::new();
 
@@ -194,7 +195,7 @@ pub trait ProcessedPacketHandler {
     fn calculate_pc(&mut self, data: Self::ProcessedPacket) -> Option<u64>;
 }
 
-struct PtwHandler {
+pub struct PtwHandler {
     buf: Vec<u64>,
 }
 
@@ -216,7 +217,7 @@ impl PacketHandler for PtwHandler {
     }
 }
 
-struct PtwDecoder;
+pub struct PtwDecoder;
 
 impl ProcessedPacketHandler for PtwDecoder {
     type ProcessedPacket = u64;

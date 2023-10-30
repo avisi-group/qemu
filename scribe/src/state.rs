@@ -5,6 +5,7 @@ use {
         fs::File,
         io::{BufWriter, Write},
         mem,
+        path::PathBuf,
         sync::atomic::{AtomicU8, Ordering},
     },
 };
@@ -28,18 +29,27 @@ impl State {
             .try_init()
             .unwrap();
 
-        let mode = arg
-            .parse::<Mode>()
-            .expect("unrecognized command line argument");
+        // parse arguments
+        let (mode, path) = {
+            let split = arg.split(',').collect::<Vec<_>>();
+
+            assert_eq!(split.len(), 2);
+
+            let mode = split[0]
+                .parse::<Mode>()
+                .expect("unrecognized command line argument");
+
+            let path = PathBuf::from(split[1]);
+
+            (mode, path)
+        };
 
         *self.inner.lock() = match mode {
-            Mode::Simple => {
-                let trace_path = "/mnt/ram/simple.trace";
-
-                InnerState::Simple(BufWriter::new(File::create(trace_path).unwrap()))
-            }
+            Mode::Simple => InnerState::Simple(BufWriter::new(
+                File::create(path.join("simple.trace")).unwrap(),
+            )),
             Mode::Tip | Mode::Fup | Mode::PtWrite => {
-                InnerState::Hardware(HardwareTracer::init(mode))
+                InnerState::Hardware(HardwareTracer::init(mode, path))
             }
             Mode::Uninitialized => unreachable!(),
         };
