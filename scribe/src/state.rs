@@ -64,11 +64,6 @@ impl State {
         Mode::Simple == self.mode()
     }
 
-    /// Returns whether direct chaining should be enabled in QEMU
-    pub fn enable_direct_chaining(&self) -> bool {
-        true
-    }
-
     /// Returns whether jmx should be inserted at the start of blocks (generates
     /// a TIP packet)
     pub fn insert_jmx_at_block_start(&self) -> bool {

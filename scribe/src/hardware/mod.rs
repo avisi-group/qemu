@@ -87,45 +87,73 @@ impl HardwareTracer {
     pub fn init(mode: Mode, path: PathBuf) -> Self {
         let (producer, consumer) = BUFFER.try_split().unwrap();
         let empty_buffer_notifier = Notify::new();
+        let writer_ready_notifier = Notify::new();
 
         match mode {
             Mode::Uninitialized | Mode::Simple => unreachable!(),
             Mode::Tip => {
-                // let pc_map = Arc::new(RwLock::new(HashMap::default()));
+                let pc_map = Arc::new(RwLock::new(HashMap::default()));
 
-                // let (sender, receiver) = ordered_queue::new();
+                let (sender, receiver) = ordered_queue::new();
 
-                // let mut trace_path = current_dir().unwrap();
-                // trace_path.push("tip.trace");
+                let writer = Writer::init::<TipDecoder, _>(
+                    path.join("tip.trace"),
+                    pc_map.clone(),
+                    receiver,
+                    writer_ready_notifier.clone(),
+                );
 
-                // let writer = Writer::init::<TipDecoder, _>(trace_path, pc_map.clone(),
-                // receiver);
+                let parser = Parser::init::<TipHandler>(
+                    empty_buffer_notifier.clone(),
+                    writer_ready_notifier,
+                    consumer,
+                    sender,
+                );
+                let (reader, perf_file_descriptor) = Reader::init(producer, mode);
 
-                // let parser =
-                //     Parser::init::<TipHandler>(empty_buffer_notifier.clone(), consumer,
-                // sender); let (reader, perf_file_descriptor) =
-                // Reader::init(producer, mode);
-
-                // Self {
-                //     perf_file_descriptor,
-                //     pc_map: Some(pc_map),
-                //     empty_buffer_notifier,
-                //     reader,
-                //     parser,
-                //     writer,
-                // }
-                todo!()
+                Self {
+                    perf_file_descriptor,
+                    pc_map: Some(pc_map),
+                    empty_buffer_notifier,
+                    reader,
+                    parser,
+                    writer,
+                }
             }
-            Mode::Fup => todo!(),
+            Mode::Fup => {
+                let pc_map = Arc::new(RwLock::new(HashMap::default()));
+
+                let (sender, receiver) = ordered_queue::new();
+
+                let writer = Writer::init::<FupDecoder, _>(
+                    path.join("fup.trace"),
+                    pc_map.clone(),
+                    receiver,
+                    writer_ready_notifier.clone(),
+                );
+
+                let parser = Parser::init::<FupHandler>(
+                    empty_buffer_notifier.clone(),
+                    writer_ready_notifier,
+                    consumer,
+                    sender,
+                );
+                let (reader, perf_file_descriptor) = Reader::init(producer, mode);
+
+                Self {
+                    perf_file_descriptor,
+                    pc_map: Some(pc_map),
+                    empty_buffer_notifier,
+                    reader,
+                    parser,
+                    writer,
+                }
+            }
             Mode::PtWrite => {
                 let (sender, receiver) = ordered_queue::new();
 
-                let trace_path = path.join("ptw.trace");
-
-                let writer_ready_notifier = Notify::new();
-
                 let writer = Writer::init::<PtwDecoder, _>(
-                    trace_path,
+                    path.join("ptw.trace"),
                     (),
                     receiver,
                     writer_ready_notifier.clone(),
@@ -305,5 +333,44 @@ impl ProcessedPacketHandler for TipDecoder {
         self.last_ip = ip;
 
         self.pc_map.read().get(&(ip - 9)).copied()
+    }
+}
+
+pub struct FupHandler {
+    buf: Vec<u64>,
+}
+
+impl PacketHandler for FupHandler {
+    type ProcessedPacket = u64;
+
+    fn new() -> Self {
+        Self { buf: Vec::new() }
+    }
+
+    fn process_packet(&mut self, packet: Packet<()>) {
+        if let Packet::Fup(inner) = packet {
+            self.buf.push(inner.fup());
+        }
+    }
+
+    fn finish(self) -> Vec<Self::ProcessedPacket> {
+        self.buf
+    }
+}
+
+pub struct FupDecoder {
+    pc_map: SharedPcMap,
+}
+
+impl ProcessedPacketHandler for FupDecoder {
+    type ProcessedPacket = u64;
+    type Ctx = SharedPcMap;
+
+    fn new(ctx: Self::Ctx) -> Self {
+        Self { pc_map: ctx }
+    }
+
+    fn calculate_pc(&mut self, data: Self::ProcessedPacket) -> Option<u64> {
+        self.pc_map.read().get(&(data - 9)).copied()
     }
 }

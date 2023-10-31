@@ -17,11 +17,6 @@ pub extern "C" fn scribe_simple_tracing() -> bool {
 }
 
 #[no_mangle]
-pub extern "C" fn scribe_enable_direct_chaining() -> bool {
-    STATE.enable_direct_chaining()
-}
-
-#[no_mangle]
 pub extern "C" fn scribe_insert_jmx_at_block_start() -> bool {
     STATE.insert_jmx_at_block_start()
 }

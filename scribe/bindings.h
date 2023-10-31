@@ -12,8 +12,6 @@ void handle_arg_scribe(const char *arg);
 
 bool scribe_simple_tracing(void);
 
-bool scribe_enable_direct_chaining(void);
-
 bool scribe_insert_jmx_at_block_start(void);
 
 bool scribe_insert_pt_write(void);

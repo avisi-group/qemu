@@ -801,10 +801,6 @@ int main(int argc, char **argv, char **envp)
     cpu_reset(cpu);
     thread_cpu = cpu;
 
-    if (!scribe_enable_direct_chaining()) {
-        cpu->tcg_cflags |= CF_NO_GOTO_TB;
-    }
-
     /*
      * Reserving too much vm space via mmap can run into problems
      * with rlimits, oom due to page table creation, etc.  We will
