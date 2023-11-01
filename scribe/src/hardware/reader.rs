@@ -1,7 +1,7 @@
 use {
     crate::{
         hardware::{
-            ring_buffer::RingBuffer,
+            ring_buffer::RingBufferAux,
             thread_handle::{Context, ThreadHandle},
             BUFFER_SIZE,
         },
@@ -133,18 +133,29 @@ fn read_pt_data(
         .map_raw(perf_file_descriptor.load(Ordering::Relaxed))
         .unwrap();
 
-    let mut ring_buffer = RingBuffer::new(mmap, aux_area);
+    //  let mut ring_buffer = RingBuffer::new(mmap.as_mut_ptr());
+    let mut ring_buffer_aux = RingBufferAux::new(mmap, aux_area);
 
     ctx.ready();
 
     loop {
-        let had_record = ring_buffer.next_record(|buf| {
+        let had_record = ring_buffer_aux.next_record(|buf| {
             let mut grant = producer
                 .grant_exact(buf.len())
                 .unwrap_or_else(|_| panic!("failed to grant {}", buf.len()));
             grant.buf().copy_from_slice(buf);
             grant.commit(buf.len());
         });
+
+        // if !had_record {
+        //     ring_buffer.next_record(|buf| {
+        //         let header: &perf_event_header = unsafe { &*(buf.as_ptr() as *const _) };
+
+        //         dbg!(header);
+
+        //         usize::try_from(header.size).unwrap()
+        //     });
+        // }
 
         if !had_record && ctx.received_exit() {
             log::trace!("read terminating");
