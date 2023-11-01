@@ -9,9 +9,8 @@ crate-type = ["lib", "staticlib"]
 
 [profile.release]
 codegen-units = 1
-lto = "fat"
-debug = true
-overflow-checks = true
+#lto = "fat"
+strip = true
 
 [dependencies]
 memmap2 = "0.9.0"
