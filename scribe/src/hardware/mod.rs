@@ -189,6 +189,12 @@ impl HardwareTracer {
     pub fn exit(self) {
         log::trace!("terminating");
 
+        // serde_json::to_writer_pretty(
+        //     std::fs::File::create("/mnt/tmp/pcmap.json").unwrap(),
+        //     &*self.pc_map.unwrap().read(),
+        // )
+        // .unwrap();
+
         let Self {
             reader,
             parser,
@@ -261,7 +267,7 @@ impl PacketWriter for PtwWriter {
 }
 
 #[derive(Debug)]
-enum Compression {
+enum Kind {
     /// Payload: 16 bits. Update last IP
     Update16,
     /// Payload: 32 bits. Update last IP
@@ -272,30 +278,38 @@ enum Compression {
     Update48,
     /// Payload: 64 bits. Full address
     Full,
+    /// Full address, but do not emit a PC
+    NoEmit,
 }
 
 struct TipParser {
-    buf: Vec<(Compression, u64)>,
+    buf: Vec<(Kind, u64)>,
 }
 
 impl PacketParser for TipParser {
-    type ProcessedPacket = (Compression, u64);
+    type ProcessedPacket = (Kind, u64);
 
     fn new() -> Self {
         Self { buf: Vec::new() }
     }
 
     fn process(&mut self, packet: Packet<()>) {
-        if let Packet::Tip(inner) = packet {
-            let compression = match inner.compression() {
-                libipt::packet::Compression::Suppressed => return,
-                libipt::packet::Compression::Update16 => Compression::Update16,
-                libipt::packet::Compression::Update32 => Compression::Update32,
-                libipt::packet::Compression::Sext48 => Compression::Sext48,
-                libipt::packet::Compression::Update48 => Compression::Update48,
-                libipt::packet::Compression::Full => Compression::Full,
-            };
-            self.buf.push((compression, inner.tip()));
+        match packet {
+            Packet::Tip(inner) => {
+                let compression = match inner.compression() {
+                    libipt::packet::Compression::Suppressed => return,
+                    libipt::packet::Compression::Update16 => Kind::Update16,
+                    libipt::packet::Compression::Update32 => Kind::Update32,
+                    libipt::packet::Compression::Sext48 => Kind::Sext48,
+                    libipt::packet::Compression::Update48 => Kind::Update48,
+                    libipt::packet::Compression::Full => Kind::Full,
+                };
+                self.buf.push((compression, inner.tip()));
+            }
+            Packet::Fup(inner) => {
+                self.buf.push((Kind::NoEmit, inner.fup()));
+            }
+            _ => (),
         }
     }
 
@@ -310,7 +324,7 @@ struct TipWriter {
 }
 
 impl PacketWriter for TipWriter {
-    type ProcessedPacket = (Compression, u64);
+    type ProcessedPacket = (Kind, u64);
 
     type Ctx = SharedPcMap;
 
@@ -323,16 +337,20 @@ impl PacketWriter for TipWriter {
 
     fn calculate_pc(&mut self, data: Self::ProcessedPacket) -> Option<u64> {
         let ip = match data.0 {
-            Compression::Update16 => (self.last_ip >> 16) << 16 | data.1,
-            Compression::Update32 => (self.last_ip >> 32) << 32 | data.1,
-            Compression::Update48 => (self.last_ip >> 48) << 48 | data.1,
-            Compression::Sext48 => (((data.1 as i64) << 16) >> 16) as u64,
-            Compression::Full => data.1,
+            Kind::Update16 => (self.last_ip >> 16) << 16 | data.1,
+            Kind::Update32 => (self.last_ip >> 32) << 32 | data.1,
+            Kind::Update48 => (self.last_ip >> 48) << 48 | data.1,
+            Kind::Sext48 => (((data.1 as i64) << 16) >> 16) as u64,
+            Kind::Full | Kind::NoEmit => data.1,
         };
 
         self.last_ip = ip;
 
-        self.pc_map.read().get(&(ip - 9)).copied()
+        if matches!(data.0, Kind::NoEmit) {
+            None
+        } else {
+            self.pc_map.read().get(&(ip - 9)).copied()
+        }
     }
 }
 

@@ -711,6 +711,7 @@ dependencies = [
  "perf-event-open-sys2",
  "pretty_env_logger",
  "rayon",
+ "serde_json",
  "twox-hash",
 ]
 

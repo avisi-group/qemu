@@ -80,8 +80,7 @@ fn run_parser<P: PacketParser>(
 
     let task_count = Arc::new(AtomicUsize::new(0));
 
-    //let mut w =
-    // std::io::BufWriter::new(std::fs::File::create("/mnt/tmp/ptdump").unwrap());
+    //  let mut w = std::io::BufWriter::new(std::fs::File::create("/mnt/tmp/ptdump").unwrap());
 
     ctx.ready();
 
@@ -116,10 +115,13 @@ fn run_parser<P: PacketParser>(
         };
 
         // for dumping raw PT data
-        // w.write_all(read.bufs().0).unwrap();
-        // w.write_all(read.bufs().1).unwrap();
-        // read.release(usize::MAX);
-        // continue;
+        // {
+        //     use std::io::Write;
+        //     w.write_all(read.bufs().0).unwrap();
+        //     w.write_all(read.bufs().1).unwrap();
+        //     read.release(usize::MAX);
+        //     continue;
+        // }
 
         // limit maximum number of tasks in flight
         while task_count.load(Ordering::Relaxed) > MAX_TASKS {}
