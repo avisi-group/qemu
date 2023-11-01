@@ -96,14 +96,14 @@ impl HardwareTracer {
 
                 let (sender, receiver) = ordered_queue::new();
 
-                let writer = Writer::init::<TipDecoder, _>(
+                let writer = Writer::init::<TipWriter, _>(
                     path.join("tip.trace"),
                     pc_map.clone(),
                     receiver,
                     writer_ready_notifier.clone(),
                 );
 
-                let parser = Parser::init::<TipHandler>(
+                let parser = Parser::init::<TipParser>(
                     empty_buffer_notifier.clone(),
                     writer_ready_notifier,
                     consumer,
@@ -125,14 +125,14 @@ impl HardwareTracer {
 
                 let (sender, receiver) = ordered_queue::new();
 
-                let writer = Writer::init::<FupDecoder, _>(
+                let writer = Writer::init::<FupWriter, _>(
                     path.join("fup.trace"),
                     pc_map.clone(),
                     receiver,
                     writer_ready_notifier.clone(),
                 );
 
-                let parser = Parser::init::<FupHandler>(
+                let parser = Parser::init::<FupParser>(
                     empty_buffer_notifier.clone(),
                     writer_ready_notifier,
                     consumer,
@@ -152,14 +152,14 @@ impl HardwareTracer {
             Mode::PtWrite => {
                 let (sender, receiver) = ordered_queue::new();
 
-                let writer = Writer::init::<PtwDecoder, _>(
+                let writer = Writer::init::<PtwWriter, _>(
                     path.join("ptw.trace"),
                     (),
                     receiver,
                     writer_ready_notifier.clone(),
                 );
 
-                let parser = Parser::init::<PtwHandler>(
+                let parser = Parser::init::<PtwParser>(
                     empty_buffer_notifier.clone(),
                     writer_ready_notifier,
                     consumer,
@@ -203,18 +203,18 @@ impl HardwareTracer {
 }
 
 /// Processes packets
-pub trait PacketHandler {
+pub trait PacketParser {
     type ProcessedPacket: Send + 'static + std::fmt::Debug;
 
     fn new() -> Self;
 
-    fn process_packet(&mut self, packet: Packet<()>);
+    fn process(&mut self, packet: Packet<()>);
 
     fn finish(self) -> Vec<Self::ProcessedPacket>;
 }
 
 /// Transforms processed packets into Program Counter values
-pub trait ProcessedPacketHandler {
+pub trait PacketWriter {
     type ProcessedPacket: Send + 'static;
     type Ctx: Send + 'static;
 
@@ -223,18 +223,18 @@ pub trait ProcessedPacketHandler {
     fn calculate_pc(&mut self, data: Self::ProcessedPacket) -> Option<u64>;
 }
 
-pub struct PtwHandler {
+pub struct PtwParser {
     buf: Vec<u64>,
 }
 
-impl PacketHandler for PtwHandler {
+impl PacketParser for PtwParser {
     type ProcessedPacket = u64;
 
     fn new() -> Self {
         Self { buf: Vec::new() }
     }
 
-    fn process_packet(&mut self, packet: Packet<()>) {
+    fn process(&mut self, packet: Packet<()>) {
         if let Packet::Ptw(inner) = packet {
             self.buf.push(inner.payload());
         }
@@ -245,9 +245,9 @@ impl PacketHandler for PtwHandler {
     }
 }
 
-pub struct PtwDecoder;
+pub struct PtwWriter;
 
-impl ProcessedPacketHandler for PtwDecoder {
+impl PacketWriter for PtwWriter {
     type ProcessedPacket = u64;
     type Ctx = ();
 
@@ -274,18 +274,18 @@ enum Compression {
     Full,
 }
 
-struct TipHandler {
+struct TipParser {
     buf: Vec<(Compression, u64)>,
 }
 
-impl PacketHandler for TipHandler {
+impl PacketParser for TipParser {
     type ProcessedPacket = (Compression, u64);
 
     fn new() -> Self {
         Self { buf: Vec::new() }
     }
 
-    fn process_packet(&mut self, packet: Packet<()>) {
+    fn process(&mut self, packet: Packet<()>) {
         if let Packet::Tip(inner) = packet {
             let compression = match inner.compression() {
                 libipt::packet::Compression::Suppressed => return,
@@ -304,12 +304,12 @@ impl PacketHandler for TipHandler {
     }
 }
 
-struct TipDecoder {
+struct TipWriter {
     last_ip: u64,
     pc_map: SharedPcMap,
 }
 
-impl ProcessedPacketHandler for TipDecoder {
+impl PacketWriter for TipWriter {
     type ProcessedPacket = (Compression, u64);
 
     type Ctx = SharedPcMap;
@@ -336,18 +336,18 @@ impl ProcessedPacketHandler for TipDecoder {
     }
 }
 
-pub struct FupHandler {
+pub struct FupParser {
     buf: Vec<u64>,
 }
 
-impl PacketHandler for FupHandler {
+impl PacketParser for FupParser {
     type ProcessedPacket = u64;
 
     fn new() -> Self {
         Self { buf: Vec::new() }
     }
 
-    fn process_packet(&mut self, packet: Packet<()>) {
+    fn process(&mut self, packet: Packet<()>) {
         if let Packet::Fup(inner) = packet {
             self.buf.push(inner.fup());
         }
@@ -358,11 +358,11 @@ impl PacketHandler for FupHandler {
     }
 }
 
-pub struct FupDecoder {
+pub struct FupWriter {
     pc_map: SharedPcMap,
 }
 
-impl ProcessedPacketHandler for FupDecoder {
+impl PacketWriter for FupWriter {
     type ProcessedPacket = u64;
     type Ctx = SharedPcMap;
 

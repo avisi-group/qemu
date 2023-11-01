@@ -4,7 +4,7 @@ use {
     crate::hardware::{
         ordered_queue::Receiver,
         thread_handle::{Context, ThreadHandle},
-        ProcessedPacketHandler,
+        PacketWriter,
     },
     std::{
         fs::File,
@@ -18,7 +18,7 @@ pub struct Writer {
 }
 
 impl Writer {
-    pub fn init<P: ProcessedPacketHandler, PATH: AsRef<Path>>(
+    pub fn init<P: PacketWriter, PATH: AsRef<Path>>(
         path: PATH,
         handler_context: P::Ctx,
         queue: Receiver<Vec<P::ProcessedPacket>>,
@@ -38,7 +38,7 @@ impl Writer {
     }
 }
 
-fn write_pt_data<P: ProcessedPacketHandler, W: Write>(
+fn write_pt_data<P: PacketWriter, W: Write>(
     thread_ctx: Context,
     mut w: W,
     mut queue: Receiver<Vec<P::ProcessedPacket>>,

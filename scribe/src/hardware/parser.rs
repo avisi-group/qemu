@@ -4,7 +4,7 @@ use {
         notify::Notify,
         ordered_queue::Sender,
         thread_handle::{Context, ThreadHandle},
-        PacketHandler, BUFFER_SIZE,
+        PacketParser, BUFFER_SIZE,
     },
     bbqueue::Consumer,
     libipt::{packet::PacketDecoder, ConfigBuilder, PtErrorCode},
@@ -32,7 +32,7 @@ pub struct Parser {
 }
 
 impl Parser {
-    pub fn init<P: PacketHandler>(
+    pub fn init<P: PacketParser>(
         empty_buffer_notifier: Notify,
         writer_ready_notifier: Notify,
         consumer: Consumer<'static, BUFFER_SIZE>,
@@ -63,7 +63,7 @@ enum ParseError {
     OneSync(usize),
 }
 
-fn run_parser<P: PacketHandler>(
+fn run_parser<P: PacketParser>(
     ctx: Context,
     empty_buffer_notifier: Notify,
     writer_ready_notifier: Notify,
@@ -80,7 +80,8 @@ fn run_parser<P: PacketHandler>(
 
     let task_count = Arc::new(AtomicUsize::new(0));
 
-    //let mut w = std::io::BufWriter::new(std::fs::File::create("/mnt/tmp/ptdump").unwrap());
+    //let mut w =
+    // std::io::BufWriter::new(std::fs::File::create("/mnt/tmp/ptdump").unwrap());
 
     ctx.ready();
 
@@ -213,7 +214,7 @@ fn find_sync_range(slice: &mut [u8]) -> Result<Range<usize>, ParseError> {
     Ok(syncpoints[0]..*syncpoints.last().unwrap())
 }
 
-fn task_fn<P: PacketHandler>(
+fn task_fn<P: PacketParser>(
     queue: Sender<Vec<P::ProcessedPacket>>,
     mut data: Vec<u8>,
     task_count: Arc<AtomicUsize>,
@@ -228,7 +229,7 @@ fn task_fn<P: PacketHandler>(
     let mut packet_handler = P::new();
 
     let result = decoder
-        .map(|r| r.map(|p| packet_handler.process_packet(p)))
+        .map(|r| r.map(|p| packet_handler.process(p)))
         .collect::<Result<(), _>>();
 
     if let Err(e) = result {

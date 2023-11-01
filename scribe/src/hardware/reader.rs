@@ -149,7 +149,8 @@ fn read_pt_data(
 
         // if !had_record {
         //     ring_buffer.next_record(|buf| {
-        //         let header: &perf_event_header = unsafe { &*(buf.as_ptr() as *const _) };
+        //         let header: &perf_event_header = unsafe { &*(buf.as_ptr() as *const
+        // _) };
 
         //         dbg!(header);
 

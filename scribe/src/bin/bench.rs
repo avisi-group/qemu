@@ -2,13 +2,13 @@ use {
     bbqueue::BBBuffer,
     memmap2::Mmap,
     scribe::hardware::{
-        notify::Notify, ordered_queue, parser::Parser, writer::Writer, PtwDecoder, PtwHandler,
+        notify::Notify, ordered_queue, parser::Parser, writer::Writer, PacketParser, PacketWriter,
         BUFFER_SIZE,
     },
     std::fs::File,
 };
 
-const RAW_DATA_PATH: &str = "/home/fm208/data/raw.pt";
+const RAW_DATA_PATH: &str = "/home/fm208/data/ptdump.tip";
 
 static BUFFER: BBBuffer<BUFFER_SIZE> = BBBuffer::new();
 
@@ -23,13 +23,8 @@ fn main() {
     let ready_notifier = Notify::new();
     let (sender, receiver) = ordered_queue::new();
 
-    let writer = Writer::init::<PtwDecoder, _>(
-        "/home/fm208/data/intelpt.trace",
-        (),
-        receiver,
-        ready_notifier.clone(),
-    );
-    let parser = Parser::init::<PtwHandler>(
+    let writer = Writer::init::<NoopWriter, _>("/dev/null", (), receiver, ready_notifier.clone());
+    let parser = Parser::init::<PrintParser>(
         empty_buffer_notifier.clone(),
         ready_notifier,
         consumer,
@@ -47,4 +42,38 @@ fn main() {
 
     parser.exit();
     writer.exit();
+}
+
+struct NoopWriter;
+
+impl PacketWriter for NoopWriter {
+    type ProcessedPacket = ();
+
+    type Ctx = ();
+
+    fn new(_: Self::Ctx) -> Self {
+        Self
+    }
+
+    fn calculate_pc(&mut self, _: Self::ProcessedPacket) -> Option<u64> {
+        None
+    }
+}
+
+struct PrintParser;
+
+impl PacketParser for PrintParser {
+    type ProcessedPacket = ();
+
+    fn new() -> Self {
+        Self
+    }
+
+    fn process(&mut self, packet: libipt::packet::Packet<()>) {
+        println!("{packet:#?}");
+    }
+
+    fn finish(self) -> Vec<Self::ProcessedPacket> {
+        vec![]
+    }
 }
