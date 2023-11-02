@@ -8,7 +8,7 @@ use {
     std::fs::File,
 };
 
-const RAW_DATA_PATH: &str = "/home/fm208/data/ptdump.tip";
+const RAW_DATA_PATH: &str = "/mnt/tmp/ptdump";
 
 static BUFFER: BBBuffer<BUFFER_SIZE> = BBBuffer::new();
 
@@ -70,7 +70,12 @@ impl PacketParser for PrintParser {
     }
 
     fn process(&mut self, packet: libipt::packet::Packet<()>) {
-        println!("{packet:#?}");
+        match packet {
+            libipt::packet::Packet::Tip(inner) => println!("tip: {:x}", inner.tip()),
+            libipt::packet::Packet::TipPge(inner) => println!("tippge: {:x}", inner.tippge()),
+            libipt::packet::Packet::Fup(inner) => println!("fup: {:x}", inner.fup()),
+            _ => println!("{packet:#x?}"),
+        }
     }
 
     fn finish(self) -> Vec<Self::ProcessedPacket> {

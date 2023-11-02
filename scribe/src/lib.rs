@@ -13,7 +13,6 @@ pub enum Mode {
     Uninitialized = 0,
     Simple = 1,
     Tip = 2,
-    Fup = 3,
     PtWrite = 4,
 }
 
@@ -22,7 +21,6 @@ impl From<u8> for Mode {
         match value {
             1 => Mode::Simple,
             2 => Mode::Tip,
-            3 => Mode::Fup,
             4 => Mode::PtWrite,
             _ => Mode::Uninitialized,
         }
@@ -42,7 +40,6 @@ impl FromStr for Mode {
         match s {
             "simple" => Ok(Mode::Simple),
             "tip" => Ok(Mode::Tip),
-            "fup" => Ok(Mode::Fup),
             "ptw" => Ok(Mode::PtWrite),
             _ => Err(s.to_owned()),
         }

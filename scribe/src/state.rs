@@ -48,9 +48,7 @@ impl State {
             Mode::Simple => InnerState::Simple(BufWriter::new(
                 File::create(path.join("simple.trace")).unwrap(),
             )),
-            Mode::Tip | Mode::Fup | Mode::PtWrite => {
-                InnerState::Hardware(HardwareTracer::init(mode, path))
-            }
+            Mode::Tip | Mode::PtWrite => InnerState::Hardware(HardwareTracer::init(mode, path)),
             Mode::Uninitialized => unreachable!(),
         };
         self.mode.store(mode.into(), Ordering::Relaxed);
@@ -67,7 +65,7 @@ impl State {
     /// Returns whether jmx should be inserted at the start of blocks (generates
     /// a TIP packet)
     pub fn insert_jmx_at_block_start(&self) -> bool {
-        self.mode() == Mode::Tip || self.mode() == Mode::Fup
+        self.mode() == Mode::Tip
     }
 
     pub fn insert_pt_write(&self) -> bool {
@@ -75,7 +73,7 @@ impl State {
     }
 
     pub fn insert_chain_count_check(&self) -> bool {
-        self.mode() == Mode::Tip || self.mode() == Mode::Fup || self.mode() == Mode::PtWrite
+        self.mode() == Mode::Tip || self.mode() == Mode::PtWrite
     }
 
     pub fn trace_guest_pc(&self, pc: u64) {
