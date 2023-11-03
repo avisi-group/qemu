@@ -1,4 +1,6 @@
-use crate::hardware::notify::Notify;
+use std::sync::{atomic::AtomicU32, Arc};
+
+use crate::hardware::{notify::Notify, reader::NUM_THREADS};
 
 use {
     crate::hardware::{
@@ -10,8 +12,14 @@ use {
         fs::File,
         io::{BufWriter, Write},
         path::Path,
+        sync::atomic::Ordering,
     },
 };
+
+/// Pending work queue depth per thread
+const THREAD_WORK_QUEUE_DEPTH: usize = 4096;
+/// Maximum number of in-flight tasks
+const MAX_TASKS: usize = NUM_THREADS * THREAD_WORK_QUEUE_DEPTH;
 
 pub struct Writer {
     handle: ThreadHandle,
@@ -23,11 +31,19 @@ impl Writer {
         handler_context: P::Ctx,
         queue: Receiver<Vec<P::ProcessedPacket>>,
         ready_notifier: Notify,
+        task_count: Arc<AtomicU32>,
     ) -> Self {
         let writer = BufWriter::new(File::create(path).unwrap());
 
         let handle = ThreadHandle::spawn(move |thread_ctx| {
-            write_pt_data::<P, _>(thread_ctx, writer, queue, handler_context, ready_notifier)
+            write_pt_data::<P, _>(
+                thread_ctx,
+                writer,
+                queue,
+                handler_context,
+                ready_notifier,
+                task_count,
+            )
         });
 
         Self { handle }
@@ -44,6 +60,7 @@ fn write_pt_data<P: PacketWriter, W: Write>(
     mut queue: Receiver<Vec<P::ProcessedPacket>>,
     handler_ctx: P::Ctx,
     ready_notifier: Notify,
+    task_count: Arc<AtomicU32>,
 ) {
     log::trace!("starting");
 
@@ -60,7 +77,9 @@ fn write_pt_data<P: PacketWriter, W: Write>(
                 return;
             };
 
-            ready_notifier.notify();
+            if task_count.load(Ordering::Relaxed) < MAX_TASKS as u32 {
+                ready_notifier.notify();
+            }
 
             continue;
         };

@@ -1,9 +1,8 @@
 use {
     crate::{
-        hardware::{notify::Notify, parser::Parser, reader::Reader, writer::Writer},
+        hardware::{notify::Notify, reader::Reader, writer::Writer},
         Mode,
     },
-    bbqueue::BBBuffer,
     libipt::packet::Packet,
     parking_lot::RwLock,
     std::{
@@ -11,7 +10,7 @@ use {
         hash::BuildHasherDefault,
         path::PathBuf,
         sync::{
-            atomic::{AtomicI32, Ordering},
+            atomic::{AtomicI32, AtomicU32, Ordering},
             Arc,
         },
     },
@@ -21,7 +20,6 @@ use {
 pub mod decoder;
 pub mod notify;
 pub mod ordered_queue;
-pub mod parser;
 pub mod reader;
 pub mod ring_buffer;
 pub mod thread_handle;
@@ -32,21 +30,15 @@ type SharedPcMap = Arc<RwLock<HashMap<u64, u64, BuildHasherDefault<XxHash64>>>>;
 /// Number of Intel PT synchronisation points included in each work item
 const _SYNC_POINTS_PER_JOB: usize = 32;
 
-/// Size of the Intel PT data buffer in bytes
-pub const BUFFER_SIZE: usize = 256 * 1024 * 1024;
-
-static BUFFER: BBBuffer<BUFFER_SIZE> = BBBuffer::new();
-
 pub struct HardwareTracer {
     pub perf_file_descriptor: Arc<AtomicI32>,
     /// Host to guest address mapping
     pc_map: Option<SharedPcMap>,
 
     empty_buffer_notifier: Notify,
+
     /// PT reader
     reader: Reader,
-    /// Handle for PT parsing thread
-    parser: Parser,
     /// Handle for trace writing thread
     writer: Writer,
 }
@@ -85,9 +77,8 @@ impl HardwareTracer {
     }
 
     pub fn init(mode: Mode, path: PathBuf) -> Self {
-        let (producer, consumer) = BUFFER.try_split().unwrap();
         let empty_buffer_notifier = Notify::new();
-        let writer_ready_notifier = Notify::new();
+        let task_count = Arc::new(AtomicU32::new(0));
 
         match mode {
             Mode::Uninitialized | Mode::Simple => unreachable!(),
@@ -100,24 +91,18 @@ impl HardwareTracer {
                     path.join("tip.trace"),
                     pc_map.clone(),
                     receiver,
-                    writer_ready_notifier.clone(),
-                );
-
-                let parser = Parser::init::<TipParser>(
                     empty_buffer_notifier.clone(),
-                    writer_ready_notifier,
-                    consumer,
-                    sender,
+                    task_count.clone(),
                 );
 
-                let (reader, perf_file_descriptor) = Reader::init(producer, mode);
+                let (reader, perf_file_descriptor) =
+                    Reader::init::<TipParser>(mode, sender, task_count);
 
                 Self {
                     perf_file_descriptor,
                     pc_map: Some(pc_map),
                     empty_buffer_notifier,
                     reader,
-                    parser,
                     writer,
                 }
             }
@@ -128,24 +113,18 @@ impl HardwareTracer {
                     path.join("ptw.trace"),
                     (),
                     receiver,
-                    writer_ready_notifier.clone(),
-                );
-
-                let parser = Parser::init::<PtwParser>(
                     empty_buffer_notifier.clone(),
-                    writer_ready_notifier,
-                    consumer,
-                    sender,
+                    task_count.clone(),
                 );
 
-                let (reader, perf_file_descriptor) = Reader::init(producer, mode);
+                let (reader, perf_file_descriptor) =
+                    Reader::init::<PtwParser>(mode, sender, task_count);
 
                 Self {
                     perf_file_descriptor,
                     pc_map: None,
                     empty_buffer_notifier,
                     reader,
-                    parser,
                     writer,
                 }
             }
@@ -171,15 +150,9 @@ impl HardwareTracer {
         //     .for_each(|(k, v)| writeln!(&mut w, "{k:x}: {v:x}").unwrap());
         //}
 
-        let Self {
-            reader,
-            parser,
-            writer,
-            ..
-        } = self;
+        let Self { reader, writer, .. } = self;
 
         reader.exit();
-        parser.exit();
         writer.exit();
     }
 }

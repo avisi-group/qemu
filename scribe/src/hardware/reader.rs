@@ -1,23 +1,26 @@
 use {
     crate::{
         hardware::{
+            decoder::{find_sync_range, ParseError},
+            ordered_queue::Sender,
             ring_buffer::RingBufferAux,
             thread_handle::{Context, ThreadHandle},
-            BUFFER_SIZE,
+            PacketParser,
         },
         Mode,
     },
-    bbqueue::Producer,
+    libipt::{packet::PacketDecoder, ConfigBuilder, PtErrorCode},
     perf_event_open_sys::{
         bindings::{perf_event_attr, perf_event_mmap_page},
         perf_event_open,
     },
+    rayon::ThreadPoolBuilder,
     std::{
         fs::File,
         io::Read,
         process,
         sync::{
-            atomic::{AtomicI32, Ordering},
+            atomic::{AtomicI32, AtomicU32, Ordering},
             Arc,
         },
     },
@@ -29,17 +32,26 @@ const INTEL_PT_TYPE_PATH: &str = "/sys/bus/event_source/devices/intel_pt/type";
 const NR_AUX_PAGES: usize = 1024;
 const NR_DATA_PAGES: usize = 256;
 
+/// Number of threads
+pub const NUM_THREADS: usize = 6;
+
 pub struct Reader {
     handle: ThreadHandle,
 }
 
 impl Reader {
-    pub fn init(producer: Producer<'static, BUFFER_SIZE>, mode: Mode) -> (Self, Arc<AtomicI32>) {
+    pub fn init<P: PacketParser>(
+        mode: Mode,
+        queue: Sender<Vec<P::ProcessedPacket>>,
+        task_count: Arc<AtomicU32>,
+    ) -> (Self, Arc<AtomicI32>) {
         let perf_file_descriptor = Arc::new(AtomicI32::new(-1));
         let fd = perf_file_descriptor.clone();
         (
             Self {
-                handle: ThreadHandle::spawn(move |ctx| read_pt_data(ctx, fd, producer, mode)),
+                handle: ThreadHandle::spawn(move |ctx| {
+                    read_pt_data::<P>(ctx, fd, queue, mode, task_count)
+                }),
             },
             perf_file_descriptor,
         )
@@ -50,11 +62,12 @@ impl Reader {
     }
 }
 
-fn read_pt_data(
+fn read_pt_data<P: PacketParser>(
     ctx: Context,
     perf_file_descriptor: Arc<AtomicI32>,
-    mut producer: Producer<BUFFER_SIZE>,
+    queue: Sender<Vec<P::ProcessedPacket>>,
     mode: Mode,
+    task_count: Arc<AtomicU32>,
 ) {
     let mut pea = perf_event_attr::default();
 
@@ -136,15 +149,75 @@ fn read_pt_data(
     //  let mut ring_buffer = RingBuffer::new(mmap.as_mut_ptr());
     let mut ring_buffer_aux = RingBufferAux::new(mmap, aux_area);
 
+    let mut next_sequence_number = 0;
+    let terminating = false;
+
+    let pool = ThreadPoolBuilder::new()
+        .num_threads(NUM_THREADS)
+        .build()
+        .unwrap();
+
+    //let mut w = std::io::BufWriter::new(File::create("/mnt/tmp/raw").unwrap());
+
     ctx.ready();
 
+    // let mut counter = 0u64;
+    // let mut last_procesed = 0;
+
     loop {
+        // counter += 1;
+        // if counter % 1048576 == 0 {
+        //     println!(
+        //         "{} bytes {} bytes",
+        //         ring_buffer_aux.total_processed,
+        //         ring_buffer_aux.total_processed - last_procesed
+        //     );
+        //     last_procesed = ring_buffer_aux.total_processed;
+        // }
+
         let had_record = ring_buffer_aux.next_record(|buf| {
-            let mut grant = producer
-                .grant_exact(buf.len())
-                .unwrap_or_else(|_| panic!("failed to grant {}", buf.len()));
-            grant.buf().copy_from_slice(buf);
-            grant.commit(buf.len());
+            // find the range of bytes alinged to sync points
+            let range = match find_sync_range(buf) {
+                Ok(range) => range,
+
+                Err(ParseError::NoSync) => {
+                    panic!("found no sync points");
+                }
+
+                // only find a single sync point
+                Err(ParseError::OneSync(start)) => {
+                    if terminating {
+                        // parse all remaining bytes even if there isn't a final sync point
+                        let range = start..buf.len();
+                        log::warn!("parsing remaining bytes in {range:?}");
+                        range
+                    } else {
+                        // we don't have enough data so release 0 bytes and try again
+                        return 0;
+                    }
+                }
+            };
+
+            // not technically necessary, but since it always holds, not holding is probably
+            // a bug?
+            assert_eq!(0, range.start);
+
+            // cloning to move into the closure
+            let queue = queue.clone();
+
+            let sequence_number = next_sequence_number;
+            next_sequence_number += 1;
+
+            let data = buf[range.clone()].to_owned();
+
+            task_count.fetch_add(1, Ordering::Relaxed);
+            let tc_clone = task_count.clone();
+            pool.spawn(move || task_fn::<P>(queue, data, sequence_number, tc_clone));
+
+            // use std::io::Write;
+            // w.write_all(&buf[range.clone()]).unwrap();
+
+            range.end
         });
 
         // if !had_record {
@@ -172,4 +245,34 @@ fn get_intel_pt_perf_type() -> u32 {
     intel_pt_type.read_to_string(&mut buf).unwrap();
 
     buf.trim().parse().unwrap()
+}
+
+fn task_fn<P: PacketParser>(
+    queue: Sender<Vec<P::ProcessedPacket>>,
+    mut data: Vec<u8>,
+    sequence_number: u64,
+    task_count: Arc<AtomicU32>,
+) {
+    // create a new decoder, synchronise it, and then assert that it synchronised to
+    // byte 0
+    let mut decoder = PacketDecoder::new(&ConfigBuilder::new(&mut data).unwrap().finish()).unwrap();
+    decoder.sync_forward().unwrap();
+    assert_eq!(decoder.sync_offset().unwrap(), 0);
+
+    let mut packet_handler = P::new();
+
+    let result = decoder
+        .map(|r| r.map(|p| packet_handler.process(p)))
+        .collect::<Result<(), _>>();
+
+    if let Err(e) = result {
+        if e.code() != PtErrorCode::Eos {
+            panic!("error while decoding: {e}");
+        }
+    }
+
+    // push processed data into queue to be picked up by writer
+    queue.send(sequence_number, packet_handler.finish());
+
+    task_count.fetch_sub(1, Ordering::Relaxed);
 }

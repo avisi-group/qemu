@@ -11,6 +11,11 @@ crate-type = ["lib", "staticlib"]
 codegen-units = 1
 lto = "fat"
 strip = true
+panic = "abort"
+
+[[bench]]
+name = "sync"
+harness = false
 
 [dependencies]
 memmap2 = "0.9.0"
@@ -21,9 +26,11 @@ perf-event-open-sys2 = "5.0.3"
 libipt = { git = "https://github.com/fmckeogh/libipt-rs" }
 pretty_env_logger = "0.5.0"
 log = { version = "0.4.20", features = ["release_max_level_off"] }
-bbqueue = "0.5.1"
 color-eyre = "0.6.2"
 rayon = "1.8.0"
+
+[dev-dependencies]
+divan = "0.1.2"
 
 [build-dependencies]
 cbindgen = "0.26.0"

@@ -4,6 +4,7 @@ cargo_build = find_program('cargo.sh')
 
 env = environment()
 env.set('CARGO_TARGET_DIR', join_paths(meson.current_build_dir(), 'target'))
+env.set('RUSTFLAGS', '-C target-cpu=native')
 
 message('Running cargo...')
 

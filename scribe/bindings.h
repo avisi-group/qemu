@@ -1,7 +1,7 @@
 /**
- * Size of the Intel PT data buffer in bytes
+ * Number of threads
  */
-#define BUFFER_SIZE ((256 * 1024) * 1024)
+#define NUM_THREADS 6
 
 /**
  * # Safety
