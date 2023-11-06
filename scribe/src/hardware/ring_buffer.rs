@@ -1,3 +1,5 @@
+use log::warn;
+
 use {
     memmap2::MmapRaw,
     perf_event_open_sys::bindings::perf_event_mmap_page,
@@ -37,7 +39,7 @@ impl RingBufferAux {
         self.mmap.as_mut_ptr() as *mut _
     }
 
-    pub fn next_record<F: FnMut(&[u8]) -> usize>(&mut self, mut process: F) -> bool {
+    pub fn next_record<F: FnOnce(&[u8]) -> usize>(&mut self, process: F) -> bool {
         let header = self.page();
 
         // SAFETY:
@@ -65,6 +67,11 @@ impl RingBufferAux {
 
         if tail == head {
             return false;
+        }
+
+        // if there is more than 3MB of data in the buffer
+        if head - tail > 3 * 1024 * 1024 {
+            warn!("Ring buffer contains >3MB of data!");
         }
 
         // head and tail constantly increase, need to wrap them to index the ring buffer

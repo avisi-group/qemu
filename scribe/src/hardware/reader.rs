@@ -1,3 +1,5 @@
+use rayon::ThreadPool;
+
 use {
     crate::{
         hardware::{
@@ -149,87 +151,20 @@ fn read_pt_data<P: PacketParser>(
     //  let mut ring_buffer = RingBuffer::new(mmap.as_mut_ptr());
     let mut ring_buffer_aux = RingBufferAux::new(mmap, aux_area);
 
-    let mut next_sequence_number = 0;
-    let terminating = false;
+    let mut task_manager = TaskManager::<P>::new(queue, task_count);
 
-    let pool = ThreadPoolBuilder::new()
-        .num_threads(NUM_THREADS)
-        .build()
-        .unwrap();
-
-    //let mut w = std::io::BufWriter::new(File::create("/mnt/tmp/raw").unwrap());
+    //let mut w = std::io::BufWriter::new(File::create("/home/fm208/data/ptdata.raw").unwrap());
 
     ctx.ready();
 
-    // let mut counter = 0u64;
-    // let mut last_procesed = 0;
-
     loop {
-        // counter += 1;
-        // if counter % 1048576 == 0 {
-        //     println!(
-        //         "{} bytes {} bytes",
-        //         ring_buffer_aux.total_processed,
-        //         ring_buffer_aux.total_processed - last_procesed
-        //     );
-        //     last_procesed = ring_buffer_aux.total_processed;
-        // }
+        // let had_record = ring_buffer_aux.next_record(|buf| {
+        //     use std::io::Write;
+        //     w.write_all(buf).unwrap();
+        //     buf.len()
+        // });
 
-        let had_record = ring_buffer_aux.next_record(|buf| {
-            // find the range of bytes alinged to sync points
-            let range = match find_sync_range(buf) {
-                Ok(range) => range,
-
-                Err(ParseError::NoSync) => {
-                    panic!("found no sync points");
-                }
-
-                // only find a single sync point
-                Err(ParseError::OneSync(start)) => {
-                    if terminating {
-                        // parse all remaining bytes even if there isn't a final sync point
-                        let range = start..buf.len();
-                        log::warn!("parsing remaining bytes in {range:?}");
-                        range
-                    } else {
-                        // we don't have enough data so release 0 bytes and try again
-                        return 0;
-                    }
-                }
-            };
-
-            // not technically necessary, but since it always holds, not holding is probably
-            // a bug?
-            assert_eq!(0, range.start);
-
-            // cloning to move into the closure
-            let queue = queue.clone();
-
-            let sequence_number = next_sequence_number;
-            next_sequence_number += 1;
-
-            let data = buf[range.clone()].to_owned();
-
-            task_count.fetch_add(1, Ordering::Relaxed);
-            let tc_clone = task_count.clone();
-            pool.spawn(move || task_fn::<P>(queue, data, sequence_number, tc_clone));
-
-            // use std::io::Write;
-            // w.write_all(&buf[range.clone()]).unwrap();
-
-            range.end
-        });
-
-        // if !had_record {
-        //     ring_buffer.next_record(|buf| {
-        //         let header: &perf_event_header = unsafe { &*(buf.as_ptr() as *const
-        // _) };
-
-        //         dbg!(header);
-
-        //         usize::try_from(header.size).unwrap()
-        //     });
-        // }
+        let had_record = ring_buffer_aux.next_record(task_manager.process_record());
 
         if !had_record && ctx.received_exit() {
             log::trace!("read terminating");
@@ -245,6 +180,95 @@ fn get_intel_pt_perf_type() -> u32 {
     intel_pt_type.read_to_string(&mut buf).unwrap();
 
     buf.trim().parse().unwrap()
+}
+
+pub struct TaskManager<P: PacketParser> {
+    terminating: bool,
+    queue: Sender<Vec<P::ProcessedPacket>>,
+    sequence_number: u64,
+    pool: ThreadPool,
+    task_count: Arc<AtomicU32>,
+}
+
+impl<P: PacketParser> TaskManager<P> {
+    pub fn new(queue: Sender<Vec<P::ProcessedPacket>>, task_count: Arc<AtomicU32>) -> Self {
+        Self {
+            terminating: false,
+            queue,
+            sequence_number: 0,
+            pool: ThreadPoolBuilder::new()
+                .num_threads(NUM_THREADS)
+                .build()
+                .unwrap(),
+            task_count,
+        }
+    }
+
+    pub fn process_record(&mut self) -> impl FnOnce(&[u8]) -> usize + '_ {
+        let queue = self.queue.clone();
+        let task_count = self.task_count.clone();
+        |buf| {
+            let consumed = sync_spawn_task::<P>(
+                buf,
+                &self.pool,
+                self.terminating,
+                queue,
+                self.sequence_number,
+                task_count,
+            );
+
+            if consumed > 0 {
+                self.sequence_number += 1;
+            }
+
+            consumed
+        }
+    }
+}
+
+/// Find a range of sync points and spawn a task to parse PT data in that range,
+/// returning the number of bytes consumed
+fn sync_spawn_task<P: PacketParser>(
+    buf: &[u8],
+    pool: &ThreadPool,
+    terminating: bool,
+    queue: Sender<Vec<P::ProcessedPacket>>,
+    sequence_number: u64,
+    task_count: Arc<AtomicU32>,
+) -> usize {
+    // find the range of bytes alinged to sync points
+    let range = match find_sync_range(buf) {
+        Ok(range) => range,
+
+        Err(ParseError::NoSync) => {
+            panic!("found no sync points");
+        }
+
+        // only find a single sync point
+        Err(ParseError::OneSync(start)) => {
+            if terminating {
+                // parse all remaining bytes even if there isn't a final sync point
+                let range = start..buf.len();
+                log::warn!("parsing remaining bytes in {range:?}");
+                range
+            } else {
+                // we don't have enough data so release 0 bytes and try again
+                return 0;
+            }
+        }
+    };
+
+    // not technically necessary, but since it always holds, not holding is probably
+    // a bug?
+    assert_eq!(0, range.start);
+
+    let data = buf[range.clone()].to_owned();
+
+    task_count.fetch_add(1, Ordering::Relaxed);
+    let tc_clone = task_count.clone();
+    pool.spawn(move || task_fn::<P>(queue, data, sequence_number, tc_clone));
+
+    range.end
 }
 
 fn task_fn<P: PacketParser>(

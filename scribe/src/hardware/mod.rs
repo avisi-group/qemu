@@ -83,28 +83,29 @@ impl HardwareTracer {
         match mode {
             Mode::Uninitialized | Mode::Simple => unreachable!(),
             Mode::Tip => {
-                let pc_map = Arc::new(RwLock::new(HashMap::default()));
+                // let pc_map = Arc::new(RwLock::new(HashMap::default()));
 
-                let (sender, receiver) = ordered_queue::new();
+                // let (sender, receiver) = ordered_queue::new();
 
-                let writer = Writer::init::<TipWriter, _>(
-                    path.join("tip.trace"),
-                    pc_map.clone(),
-                    receiver,
-                    empty_buffer_notifier.clone(),
-                    task_count.clone(),
-                );
+                // let writer = Writer::init::<TipWriter, _>(
+                //     path.join("tip.trace"),
+                //     pc_map.clone(),
+                //     receiver,
+                //     empty_buffer_notifier.clone(),
+                //     task_count.clone(),
+                // );
 
-                let (reader, perf_file_descriptor) =
-                    Reader::init::<TipParser>(mode, sender, task_count);
+                // let (reader, perf_file_descriptor) =
+                //     Reader::init::<TipParser>(mode, sender, task_count);
 
-                Self {
-                    perf_file_descriptor,
-                    pc_map: Some(pc_map),
-                    empty_buffer_notifier,
-                    reader,
-                    writer,
-                }
+                // Self {
+                //     perf_file_descriptor,
+                //     pc_map: Some(pc_map),
+                //     empty_buffer_notifier,
+                //     reader,
+                //     writer,
+                // }
+                todo!()
             }
             Mode::PtWrite => {
                 let (sender, receiver) = ordered_queue::new();
