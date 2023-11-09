@@ -1,4 +1,4 @@
-use scribe::hardware::decoder::{
+use scribe::hardware::decoder::sync::{
     find_next_sync, find_next_sync_ipt, find_next_sync_simple, find_next_sync_unsafe,
 };
 

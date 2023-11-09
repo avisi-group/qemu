@@ -1,5 +1,3 @@
-use log::warn;
-
 use {
     memmap2::MmapRaw,
     perf_event_open_sys::bindings::perf_event_mmap_page,
@@ -10,10 +8,6 @@ pub struct RingBufferAux {
     mmap: MmapRaw,
     aux_area: MmapRaw,
     size: usize,
-    // last_tail: usize,
-    // pub did_something: u64,
-    // pub did_nothing: u64,
-    // pub total_processed: usize,
 }
 
 impl RingBufferAux {
@@ -28,10 +22,6 @@ impl RingBufferAux {
             mmap,
             aux_area,
             size,
-            // last_tail: 0,
-            // did_something: 0,
-            // did_nothing: 0,
-            // total_processed: 0,
         }
     }
 
@@ -39,7 +29,7 @@ impl RingBufferAux {
         self.mmap.as_mut_ptr() as *mut _
     }
 
-    pub fn next_record<F: FnOnce(&[u8]) -> usize>(&mut self, process: F) -> bool {
+    pub fn next_data<F: FnOnce(&[u8]) -> usize>(&mut self, callback: F) -> usize {
         let header = self.page();
 
         // SAFETY:
@@ -47,14 +37,6 @@ impl RingBufferAux {
         // - aux_tail is only written by the user side so it is safe to do a non-atomic
         //   read here.
         let tail = unsafe { ptr::read(ptr::addr_of!((*header).aux_tail)) } as usize;
-
-        // if tail == self.last_tail {
-        //     self.did_nothing += 1;
-        // } else {
-        //     self.did_something += 1;
-        // }
-
-        // self.last_tail = tail;
 
         // ATOMICS:
         // - The acquire load here syncronizes with the release store in the kernel and
@@ -66,19 +48,19 @@ impl RingBufferAux {
             unsafe { atomic_load(ptr::addr_of!((*header).aux_head), Ordering::Acquire) } as usize;
 
         if tail == head {
-            return false;
+            return 0;
         }
 
-        // if there is more than 3MB of data in the buffer
-        if head - tail > 3 * 1024 * 1024 {
-            warn!("Ring buffer contains >3MB of data!");
+        // panic if there is more than 6MB of data in the buffer
+        if head - tail > 6 * 1024 * 1024 {
+            panic!("Ring buffer contains >6MB of data!");
         }
 
         // head and tail constantly increase, need to wrap them to index the ring buffer
         let wrapped_head = head % self.size;
         let wrapped_tail = tail % self.size;
 
-        let processed = if wrapped_head > wrapped_tail {
+        let consumed = if wrapped_head > wrapped_tail {
             // single slice from tail to head
             let slice = unsafe {
                 slice::from_raw_parts(
@@ -86,7 +68,8 @@ impl RingBufferAux {
                     wrapped_head - wrapped_tail,
                 )
             };
-            process(slice)
+
+            callback(slice)
         } else {
             // head is *less* than tail
 
@@ -105,10 +88,8 @@ impl RingBufferAux {
                 slice::from_raw_parts(self.aux_area.as_mut_ptr(), wrapped_head)
             });
 
-            process(&buf)
+            callback(&buf)
         };
-
-        // self.total_processed += processed;
 
         // ATOMICS:
         // - The release store here prevents the compiler from re-ordering any reads
@@ -118,109 +99,12 @@ impl RingBufferAux {
         unsafe {
             atomic_store(
                 ptr::addr_of!((*header).aux_tail),
-                u64::try_from(tail + processed).unwrap(),
+                u64::try_from(tail + consumed).unwrap(),
                 Ordering::Release,
             );
         }
 
-        true
-    }
-}
-
-pub struct RingBuffer {
-    mmap: *mut u8,
-    data: *const u8,
-    size: usize,
-}
-
-impl RingBuffer {
-    pub fn new(mmap: *mut u8) -> Self {
-        let size = unsafe {
-            ptr::read(ptr::addr_of!(
-                (*(mmap as *mut perf_event_mmap_page)).data_size
-            ))
-        } as usize;
-
-        let data = unsafe {
-            mmap.add(ptr::read(ptr::addr_of!(
-                (*(mmap as *mut perf_event_mmap_page)).data_offset
-            )) as usize)
-        };
-
-        Self { mmap, data, size }
-    }
-
-    fn page(&self) -> *mut perf_event_mmap_page {
-        self.mmap as *mut _
-    }
-
-    pub fn next_record<F: FnMut(&[u8]) -> usize>(&mut self, mut process: F) -> bool {
-        let header = self.page();
-
-        // SAFETY:
-        // - page points to a valid instance of perf_event_mmap_page.
-        // - data_tail is only written by the user side so it is safe to do a non-atomic
-        //   read here.
-        let tail = unsafe { ptr::read(ptr::addr_of!((*header).data_tail)) } as usize;
-
-        // ATOMICS:
-        // - The acquire load here syncronizes with the release store in the kernel and
-        //   ensures that all the data written to the ring buffer before data_head is
-        //   visible to this thread.
-        // SAFETY:
-        // - page points to a valid instance of perf_event_mmap_page.
-        let head =
-            unsafe { atomic_load(ptr::addr_of!((*header).data_head), Ordering::Acquire) } as usize;
-
-        if tail == head {
-            return false;
-        }
-
-        // head and tail constantly increase, need to wrap them to index the ring buffer
-        let wrapped_head = head % self.size;
-        let wrapped_tail = tail % self.size;
-
-        let used = if wrapped_head > wrapped_tail {
-            // single slice from tail to head
-            let slice = unsafe {
-                slice::from_raw_parts(self.data.add(wrapped_tail), wrapped_head - wrapped_tail)
-            };
-            process(slice)
-        } else {
-            // head is *less* than tail
-
-            let mut buf = Vec::with_capacity((self.size - wrapped_tail) + wrapped_head);
-
-            // so first slice goes from tail to the end of the buffer
-            buf.extend_from_slice(unsafe {
-                slice::from_raw_parts(self.data.add(wrapped_tail), self.size - wrapped_tail)
-            });
-            // and the second slice goes from the beginning to the head
-            buf.extend_from_slice(unsafe { slice::from_raw_parts(self.data, wrapped_head) });
-
-            process(&buf)
-        };
-
-        // SAFETY:
-        // - page points to a valid instance of perf_event_mmap_page
-        // - data_tail is only written on our side so it is safe to do a non-atomic read
-        //   here.
-        let tail = unsafe { ptr::read(ptr::addr_of!((*header).data_tail)) };
-
-        // ATOMICS:
-        // - The release store here prevents the compiler from re-ordering any reads
-        //   past the store to data_tail.
-        // SAFETY:
-        // - page points to a valid instance of perf_event_mmap_page
-        unsafe {
-            atomic_store(
-                ptr::addr_of!((*header).data_tail),
-                tail + u64::try_from(used).unwrap(),
-                Ordering::Release,
-            )
-        };
-
-        true
+        consumed
     }
 }
 

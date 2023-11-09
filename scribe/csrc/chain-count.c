@@ -11,7 +11,7 @@ void init_chain_count_cpu_state(uint32_t *c_count)
 
 void reset_chain_count(void)
 {
-   *chain_count = 600;
+   *chain_count = 1000;
 }
 
 /*

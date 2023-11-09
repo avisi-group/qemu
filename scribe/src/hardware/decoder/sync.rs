@@ -1,4 +1,5 @@
 use {
+    crate::hardware::MAX_SYNCPOINTS,
     libipt::{packet::PacketDecoder, ConfigBuilder},
     std::{mem::size_of, ops::Range},
 };
@@ -46,9 +47,6 @@ pub enum ParseError {
     /// Failed to parse slice as only a single sync point ({0:?}) was found
     OneSync(usize),
 }
-
-/// Number of Intel PT synchronisation points included in each work item
-const MAX_SYNCPOINTS: usize = 128;
 
 /// Finds the syncpoints in the supplied slice, returned as a range
 /// containing up to `MAX_SYNCPOINTS` syncpoints
@@ -213,12 +211,12 @@ pub fn find_next_sync_unsafe(data: &[u8]) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-    use crate::hardware::decoder::{
+    use crate::hardware::decoder::sync::{
         find_next_sync, find_next_sync_ipt, find_next_sync_simple, find_next_sync_unsafe,
     };
 
     fn harness<A: Fn(&[u8]) -> Option<usize>, B: Fn(&[u8]) -> Option<usize>>(a: A, b: B) {
-        let mut data = &include_bytes!("../../benches/data.pt")[..];
+        let mut data = &include_bytes!("../../../benches/data.pt")[..];
 
         loop {
             let a_res = a(data);

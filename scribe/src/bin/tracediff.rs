@@ -35,7 +35,7 @@ fn main() -> Result<()> {
                     buf.copy_from_slice(r);
                     u64::from_le_bytes(buf)
                 };
-                println!("{idx}: {l:x} != {r:x}");
+                println!("index: {idx}, byte: {}, {l:x} != {r:x}", idx * 8);
                 exit(-1);
             }
         });

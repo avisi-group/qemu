@@ -1,13 +1,11 @@
-use rayon::ThreadPool;
-
 use {
     crate::{
         hardware::{
-            decoder::{find_sync_range, ParseError},
+            decoder::sync::{find_sync_range, ParseError},
             ordered_queue::Sender,
             ring_buffer::RingBufferAux,
             thread_handle::{Context, ThreadHandle},
-            PacketParser,
+            PacketParser, NUM_THREADS,
         },
         Mode,
     },
@@ -16,7 +14,7 @@ use {
         bindings::{perf_event_attr, perf_event_mmap_page},
         perf_event_open,
     },
-    rayon::ThreadPoolBuilder,
+    rayon::{ThreadPool, ThreadPoolBuilder},
     std::{
         fs::File,
         io::Read,
@@ -31,11 +29,8 @@ use {
 /// Path to the value of the current Intel PT type
 const INTEL_PT_TYPE_PATH: &str = "/sys/bus/event_source/devices/intel_pt/type";
 
-const NR_AUX_PAGES: usize = 1024;
+const NR_AUX_PAGES: usize = 4096;
 const NR_DATA_PAGES: usize = 256;
-
-/// Number of threads
-pub const NUM_THREADS: usize = 6;
 
 pub struct Reader {
     handle: ThreadHandle,
@@ -148,27 +143,39 @@ fn read_pt_data<P: PacketParser>(
         .map_raw(perf_file_descriptor.load(Ordering::Relaxed))
         .unwrap();
 
-    //  let mut ring_buffer = RingBuffer::new(mmap.as_mut_ptr());
     let mut ring_buffer_aux = RingBufferAux::new(mmap, aux_area);
 
     let mut task_manager = TaskManager::<P>::new(queue, task_count);
 
-    //let mut w = std::io::BufWriter::new(File::create("/home/fm208/data/ptdata.raw").unwrap());
+    //  let mut w =
+    // std::io::BufWriter::new(File::create("/mnt/tmp/ptdata.raw").unwrap());
+    let mut terminating = false;
 
     ctx.ready();
 
     loop {
-        // let had_record = ring_buffer_aux.next_record(|buf| {
+        // let had_record = ring_buffer_aux.next_data(|buf| {
         //     use std::io::Write;
         //     w.write_all(buf).unwrap();
         //     buf.len()
         // });
 
-        let had_record = ring_buffer_aux.next_record(task_manager.process_record());
+        let consumed = ring_buffer_aux.next_data(task_manager.callback(terminating));
 
-        if !had_record && ctx.received_exit() {
-            log::trace!("read terminating");
-            return;
+        // only perform additional logic if we consumed 0, otherwise immediately call next data
+        if consumed == 0 {
+            // if we consumed nothing and are terminating, exit
+            if terminating {
+                log::trace!("read terminating");
+                return;
+            }
+
+            // if we consumed nothing and are not terminating, run callback with terminating = true
+            if ctx.received_exit() {
+                log::trace!("reader received exit");
+                terminating = true;
+                continue;
+            }
         }
     }
 }
@@ -183,7 +190,6 @@ fn get_intel_pt_perf_type() -> u32 {
 }
 
 pub struct TaskManager<P: PacketParser> {
-    terminating: bool,
     queue: Sender<Vec<P::ProcessedPacket>>,
     sequence_number: u64,
     pool: ThreadPool,
@@ -193,7 +199,6 @@ pub struct TaskManager<P: PacketParser> {
 impl<P: PacketParser> TaskManager<P> {
     pub fn new(queue: Sender<Vec<P::ProcessedPacket>>, task_count: Arc<AtomicU32>) -> Self {
         Self {
-            terminating: false,
             queue,
             sequence_number: 0,
             pool: ThreadPoolBuilder::new()
@@ -204,14 +209,14 @@ impl<P: PacketParser> TaskManager<P> {
         }
     }
 
-    pub fn process_record(&mut self) -> impl FnOnce(&[u8]) -> usize + '_ {
+    pub fn callback(&mut self, terminating: bool) -> impl FnOnce(&[u8]) -> usize + '_ {
         let queue = self.queue.clone();
         let task_count = self.task_count.clone();
-        |buf| {
+        move |buf| {
             let consumed = sync_spawn_task::<P>(
                 buf,
                 &self.pool,
-                self.terminating,
+                terminating,
                 queue,
                 self.sequence_number,
                 task_count,
@@ -268,7 +273,7 @@ fn sync_spawn_task<P: PacketParser>(
     let tc_clone = task_count.clone();
     pool.spawn(move || task_fn::<P>(queue, data, sequence_number, tc_clone));
 
-    range.end
+    range.len()
 }
 
 fn task_fn<P: PacketParser>(

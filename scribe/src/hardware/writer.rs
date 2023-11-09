@@ -1,25 +1,20 @@
-use std::sync::{atomic::AtomicU32, Arc};
-
-use crate::hardware::{notify::Notify, reader::NUM_THREADS};
-
 use {
     crate::hardware::{
+        notify::Notify,
         ordered_queue::Receiver,
         thread_handle::{Context, ThreadHandle},
-        PacketWriter,
+        PacketWriter, MAX_TASKS,
     },
     std::{
         fs::File,
         io::{BufWriter, Write},
         path::Path,
-        sync::atomic::Ordering,
+        sync::{
+            atomic::{AtomicU32, Ordering},
+            Arc,
+        },
     },
 };
-
-/// Pending work queue depth per thread
-const THREAD_WORK_QUEUE_DEPTH: usize = 4096;
-/// Maximum number of in-flight tasks
-const MAX_TASKS: usize = NUM_THREADS * THREAD_WORK_QUEUE_DEPTH;
 
 pub struct Writer {
     handle: ThreadHandle,
@@ -30,7 +25,7 @@ impl Writer {
         path: PATH,
         handler_context: P::Ctx,
         queue: Receiver<Vec<P::ProcessedPacket>>,
-        ready_notifier: Notify,
+        notifier: Notify,
         task_count: Arc<AtomicU32>,
     ) -> Self {
         let writer = BufWriter::new(File::create(path).unwrap());
@@ -41,7 +36,7 @@ impl Writer {
                 writer,
                 queue,
                 handler_context,
-                ready_notifier,
+                notifier,
                 task_count,
             )
         });
@@ -59,7 +54,7 @@ fn write_pt_data<P: PacketWriter, W: Write>(
     mut w: W,
     mut queue: Receiver<Vec<P::ProcessedPacket>>,
     handler_ctx: P::Ctx,
-    ready_notifier: Notify,
+    notifier: Notify,
     task_count: Arc<AtomicU32>,
 ) {
     log::trace!("starting");
@@ -72,13 +67,14 @@ fn write_pt_data<P: PacketWriter, W: Write>(
         let Some(data) = queue.recv() else {
             if thread_ctx.received_exit() {
                 log::info!("writer terminating");
+                while task_count.load(Ordering::Relaxed) != 0 {}
                 assert!(queue.is_empty());
                 w.flush().unwrap();
                 return;
             };
 
             if task_count.load(Ordering::Relaxed) < MAX_TASKS as u32 {
-                ready_notifier.notify();
+                notifier.notify();
             }
 
             continue;

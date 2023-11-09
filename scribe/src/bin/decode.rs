@@ -41,7 +41,7 @@ fn main() -> Result<()> {
     let mut current_index = 0;
 
     while current_index < raw.len() {
-        let consumed = task_manager.process_record()(&raw[current_index..]);
+        let consumed = task_manager.callback(false)(&raw[current_index..]);
         current_index += consumed;
     }
 

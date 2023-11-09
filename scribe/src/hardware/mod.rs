@@ -1,6 +1,6 @@
 use {
     crate::{
-        hardware::{notify::Notify, reader::Reader, writer::Writer},
+        hardware::{decoder::tip::Kind, notify::Notify, reader::Reader, writer::Writer},
         Mode,
     },
     libipt::packet::Packet,
@@ -28,15 +28,21 @@ pub mod writer;
 type SharedPcMap = Arc<RwLock<HashMap<u64, u64, BuildHasherDefault<XxHash64>>>>;
 
 /// Number of Intel PT synchronisation points included in each work item
-const _SYNC_POINTS_PER_JOB: usize = 32;
+const MAX_SYNCPOINTS: usize = 32;
+/// Number of threads
+pub const NUM_THREADS: usize = 6;
+/// Pending work queue depth per thread
+const THREAD_WORK_QUEUE_DEPTH: usize = 64;
+/// Maximum number of in-flight tasks
+const MAX_TASKS: usize = NUM_THREADS * THREAD_WORK_QUEUE_DEPTH;
 
 pub struct HardwareTracer {
     pub perf_file_descriptor: Arc<AtomicI32>,
     /// Host to guest address mapping
     pc_map: Option<SharedPcMap>,
 
-    empty_buffer_notifier: Notify,
-
+    writer_notifier: Notify,
+    //reader_notifier: Notify,
     /// PT reader
     reader: Reader,
     /// Handle for trace writing thread
@@ -77,65 +83,70 @@ impl HardwareTracer {
     }
 
     pub fn init(mode: Mode, path: PathBuf) -> Self {
-        let empty_buffer_notifier = Notify::new();
-        let task_count = Arc::new(AtomicU32::new(0));
-
         match mode {
             Mode::Uninitialized | Mode::Simple => unreachable!(),
             Mode::Tip => {
-                // let pc_map = Arc::new(RwLock::new(HashMap::default()));
+                let pc_map = Arc::new(RwLock::new(HashMap::default()));
 
-                // let (sender, receiver) = ordered_queue::new();
+                let writer_notifier = Notify::new();
+                let task_count = Arc::new(AtomicU32::new(0));
 
-                // let writer = Writer::init::<TipWriter, _>(
-                //     path.join("tip.trace"),
-                //     pc_map.clone(),
-                //     receiver,
-                //     empty_buffer_notifier.clone(),
-                //     task_count.clone(),
-                // );
-
-                // let (reader, perf_file_descriptor) =
-                //     Reader::init::<TipParser>(mode, sender, task_count);
-
-                // Self {
-                //     perf_file_descriptor,
-                //     pc_map: Some(pc_map),
-                //     empty_buffer_notifier,
-                //     reader,
-                //     writer,
-                // }
-                todo!()
-            }
-            Mode::PtWrite => {
                 let (sender, receiver) = ordered_queue::new();
 
-                let writer = Writer::init::<PtwWriter, _>(
-                    path.join("ptw.trace"),
-                    (),
+                let writer = Writer::init::<TipWriter, _>(
+                    path.join("tip.trace"),
+                    pc_map.clone(),
                     receiver,
-                    empty_buffer_notifier.clone(),
+                    writer_notifier.clone(),
                     task_count.clone(),
                 );
 
                 let (reader, perf_file_descriptor) =
-                    Reader::init::<PtwParser>(mode, sender, task_count);
+                    Reader::init::<TipParser>(mode, sender, task_count);
 
                 Self {
                     perf_file_descriptor,
-                    pc_map: None,
-                    empty_buffer_notifier,
+                    pc_map: Some(pc_map),
+                    writer_notifier,
+
                     reader,
                     writer,
                 }
+            }
+            Mode::PtWrite => {
+                // let writer_notifier = Notify::new();
+                // let task_count = Arc::new(AtomicU32::new(0));
+
+                // let (sender, receiver) = ordered_queue::new();
+
+                // let writer = Writer::init::<PtwWriter, _>(
+                //     path.join("ptw.trace"),
+                //     (),
+                //     receiver,
+                //     writer_notifier.clone(),
+                //     task_count.clone(),
+                // );
+
+                // let (reader, perf_file_descriptor) =
+                //     Reader::init::<PtwParser>(mode, sender, task_count);
+
+                // Self {
+                //     perf_file_descriptor,
+                //     pc_map: None,
+                //     writer_notifier,
+
+                //     reader,
+                //     writer,
+                // }
+                todo!()
             }
         }
     }
 
     /// Waits for the internal ring buffer to be empty
     pub fn wait_for_empty(&self) {
-        log::trace!("waiting");
-        self.empty_buffer_notifier.wait();
+        //  self.reader_notifier.wait();
+        self.writer_notifier.wait();
     }
 
     pub fn exit(self) {
@@ -153,7 +164,9 @@ impl HardwareTracer {
 
         let Self { reader, writer, .. } = self;
 
+        log::trace!("reader exiting");
         reader.exit();
+        log::trace!("writer exiting");
         writer.exit();
     }
 }
@@ -214,22 +227,6 @@ impl PacketWriter for PtwWriter {
     fn calculate_pc(&mut self, data: Self::ProcessedPacket) -> Option<u64> {
         Some(data)
     }
-}
-
-#[derive(Debug)]
-pub enum Kind {
-    /// Payload: 16 bits. Update last IP
-    Update16,
-    /// Payload: 32 bits. Update last IP
-    Update32,
-    /// Payload: 48 bits. Update last IP
-    Update48,
-    /// Payload: 64 bits. Full address
-    Update64,
-    /// Payload: 48 bits. Sign extend to full address
-    SignExtend48,
-    /// Full address, but do not emit a PC
-    Update64NoEmit,
 }
 
 pub struct TipParser {
