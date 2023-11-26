@@ -29,7 +29,7 @@ use {
 /// Path to the value of the current Intel PT type
 const INTEL_PT_TYPE_PATH: &str = "/sys/bus/event_source/devices/intel_pt/type";
 
-const NR_AUX_PAGES: usize = 4096;
+const NR_AUX_PAGES: usize = 16 * 1024;
 const NR_DATA_PAGES: usize = 256;
 
 pub struct Reader {
@@ -146,15 +146,14 @@ fn read_pt_data<P: PacketParser>(
     let mut ring_buffer_aux = RingBufferAux::new(mmap, aux_area);
 
     let mut task_manager = TaskManager::<P>::new(queue, task_count);
+    // let mut w = std::io::BufWriter::new(File::create("/tmp/pt/ptdata.raw").unwrap());
 
-    //  let mut w =
-    // std::io::BufWriter::new(File::create("/mnt/tmp/ptdata.raw").unwrap());
     let mut terminating = false;
 
     ctx.ready();
 
     loop {
-        // let had_record = ring_buffer_aux.next_data(|buf| {
+        // let consumed = ring_buffer_aux.next_data(|buf| {
         //     use std::io::Write;
         //     w.write_all(buf).unwrap();
         //     buf.len()
@@ -162,7 +161,8 @@ fn read_pt_data<P: PacketParser>(
 
         let consumed = ring_buffer_aux.next_data(task_manager.callback(terminating));
 
-        // only perform additional logic if we consumed 0, otherwise immediately call next data
+        // only perform additional logic if we consumed 0, otherwise immediately call
+        // next data
         if consumed == 0 {
             // if we consumed nothing and are terminating, exit
             if terminating {
@@ -170,7 +170,8 @@ fn read_pt_data<P: PacketParser>(
                 return;
             }
 
-            // if we consumed nothing and are not terminating, run callback with terminating = true
+            // if we consumed nothing and are not terminating, run callback with terminating
+            // = true
             if ctx.received_exit() {
                 log::trace!("reader received exit");
                 terminating = true;

@@ -51,9 +51,9 @@ impl RingBufferAux {
             return 0;
         }
 
-        // panic if there is more than 6MB of data in the buffer
-        if head - tail > 6 * 1024 * 1024 {
-            panic!("Ring buffer contains >6MB of data!");
+        // panic if buffer is >90% full
+        if head - tail > ((self.size * 10) / 9) {
+            panic!("Ring buffer exceeded >90% capacity");
         }
 
         // head and tail constantly increase, need to wrap them to index the ring buffer

@@ -108,37 +108,35 @@ impl HardwareTracer {
                     perf_file_descriptor,
                     pc_map: Some(pc_map),
                     writer_notifier,
-
                     reader,
                     writer,
                 }
             }
             Mode::PtWrite => {
-                // let writer_notifier = Notify::new();
-                // let task_count = Arc::new(AtomicU32::new(0));
+                let writer_notifier = Notify::new();
+                let task_count = Arc::new(AtomicU32::new(0));
 
-                // let (sender, receiver) = ordered_queue::new();
+                let (sender, receiver) = ordered_queue::new();
 
-                // let writer = Writer::init::<PtwWriter, _>(
-                //     path.join("ptw.trace"),
-                //     (),
-                //     receiver,
-                //     writer_notifier.clone(),
-                //     task_count.clone(),
-                // );
+                let writer = Writer::init::<PtwWriter, _>(
+                    path.join("ptw.trace"),
+                    (),
+                    receiver,
+                    writer_notifier.clone(),
+                    task_count.clone(),
+                );
 
-                // let (reader, perf_file_descriptor) =
-                //     Reader::init::<PtwParser>(mode, sender, task_count);
+                let (reader, perf_file_descriptor) =
+                    Reader::init::<PtwParser>(mode, sender, task_count);
 
-                // Self {
-                //     perf_file_descriptor,
-                //     pc_map: None,
-                //     writer_notifier,
+                Self {
+                    perf_file_descriptor,
+                    pc_map: None,
+                    writer_notifier,
 
-                //     reader,
-                //     writer,
-                // }
-                todo!()
+                    reader,
+                    writer,
+                }
             }
         }
     }
@@ -152,15 +150,10 @@ impl HardwareTracer {
     pub fn exit(self) {
         log::trace!("terminating");
 
-        //{
-        // use std::io::Write;
-        // let mut w = std::fs::File::create("/mnt/tmp/pcmap.txt").unwrap();
-        // self.pc_map
-        //     .unwrap()
-        //     .read()
-        //     .iter()
-        //     .for_each(|(k, v)| writeln!(&mut w, "{k:x}: {v:x}").unwrap());
-        //}
+        // {
+        //     let w = std::fs::File::create("/tmp/pt/pcmap.json").unwrap();
+        //     serde_json::to_writer_pretty(w, &*self.pc_map.unwrap().read()).unwrap();
+        // }
 
         let Self { reader, writer, .. } = self;
 

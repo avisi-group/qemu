@@ -1,10 +1,10 @@
 struct Parser<'buf> {
-    buf: &'buf [u8],
+    _buf: &'buf [u8],
 }
 
 impl<'buf> Parser<'buf> {
-    pub fn new(buf: &'buf [u8]) -> Self {
-        Self { buf }
+    pub fn _new(buf: &'buf [u8]) -> Self {
+        Self { _buf: buf }
     }
 }
 
@@ -48,8 +48,8 @@ impl<'buf> Iterator for Parser<'buf> {
 
 //         let expected = {
 //             let mut decoder =
-//                 PacketDecoder::new(&ConfigBuilder::new(&mut data.to_owned()).unwrap().finish())
-//                     .unwrap();
+//                 PacketDecoder::new(&ConfigBuilder::new(&mut
+// data.to_owned()).unwrap().finish())                     .unwrap();
 //             decoder.sync_forward().unwrap();
 //             assert_eq!(decoder.sync_offset().unwrap(), 0);
 
@@ -58,17 +58,17 @@ impl<'buf> Iterator for Parser<'buf> {
 //                     r.map(|p| match p {
 //                         Packet::Tip(inner) => {
 //                             let compression = match inner.compression() {
-//                                 libipt::packet::Compression::Suppressed => return None,
-//                                 libipt::packet::Compression::Update16 => Kind::Update16,
-//                                 libipt::packet::Compression::Update32 => Kind::Update32,
-//                                 libipt::packet::Compression::Sext48 => Kind::SignExtend48,
-//                                 libipt::packet::Compression::Update48 => Kind::Update48,
-//                                 libipt::packet::Compression::Full => Kind::Update64,
-//                             };
-//                             Some((compression, inner.tip()))
+//                                 libipt::packet::Compression::Suppressed =>
+// return None,
+// libipt::packet::Compression::Update16 => Kind::Update16,
+// libipt::packet::Compression::Update32 => Kind::Update32,
+// libipt::packet::Compression::Sext48 => Kind::SignExtend48,
+// libipt::packet::Compression::Update48 => Kind::Update48,
+// libipt::packet::Compression::Full => Kind::Update64,
+// };                             Some((compression, inner.tip()))
 //                         }
-//                         Packet::Fup(inner) => Some((Kind::Update64NoEmit, inner.fup())),
-//                         _ => None,
+//                         Packet::Fup(inner) => Some((Kind::Update64NoEmit,
+// inner.fup())),                         _ => None,
 //                     })
 //                 })
 //                 .filter_map(Result::transpose)
