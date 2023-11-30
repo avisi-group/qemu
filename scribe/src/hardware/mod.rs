@@ -34,7 +34,7 @@ pub const NUM_THREADS: usize = 6;
 /// Pending work queue depth per thread
 const THREAD_WORK_QUEUE_DEPTH: usize = 64;
 /// Maximum number of in-flight tasks
-const MAX_TASKS: usize = NUM_THREADS * THREAD_WORK_QUEUE_DEPTH;
+pub const MAX_TASKS: usize = NUM_THREADS * THREAD_WORK_QUEUE_DEPTH;
 
 pub struct HardwareTracer {
     pub perf_file_descriptor: Arc<AtomicI32>,

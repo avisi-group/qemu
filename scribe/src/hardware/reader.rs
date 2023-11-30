@@ -146,7 +146,8 @@ fn read_pt_data<P: PacketParser>(
     let mut ring_buffer_aux = RingBufferAux::new(mmap, aux_area);
 
     let mut task_manager = TaskManager::<P>::new(queue, task_count);
-    // let mut w = std::io::BufWriter::new(File::create("/tmp/pt/ptdata.raw").unwrap());
+    //let mut w =
+    // std::io::BufWriter::new(File::create("/tmp/pt/ptdata.raw").unwrap());
 
     let mut terminating = false;
 
@@ -266,6 +267,8 @@ fn sync_spawn_task<P: PacketParser>(
 
     // not technically necessary, but since it always holds, not holding is probably
     // a bug?
+    // EDIT: always holds when reading from hardware buffer, does not always hold
+    // when reading from perf dump
     assert_eq!(0, range.start);
 
     let data = buf[range.clone()].to_owned();

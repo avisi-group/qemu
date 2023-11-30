@@ -63,15 +63,20 @@ fn write_pt_data<P: PacketWriter, W: Write>(
 
     thread_ctx.ready();
 
+    let mut exiting = false;
+
     loop {
         let Some(data) = queue.recv() else {
             if thread_ctx.received_exit() {
                 log::info!("writer terminating");
-                while task_count.load(Ordering::Relaxed) != 0 {}
+                exiting = true;
+            };
+
+            if exiting && task_count.load(Ordering::Relaxed) == 0 {
                 assert!(queue.is_empty());
                 w.flush().unwrap();
                 return;
-            };
+            }
 
             if task_count.load(Ordering::Relaxed) < MAX_TASKS as u32 {
                 notifier.notify();

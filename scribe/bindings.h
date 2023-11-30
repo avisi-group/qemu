@@ -4,6 +4,11 @@
 #define NUM_THREADS 6
 
 /**
+ * Maximum number of in-flight tasks
+ */
+#define MAX_TASKS (NUM_THREADS * THREAD_WORK_QUEUE_DEPTH)
+
+/**
  * # Safety
  *
  * Arg must be a valid pointer to a valid C string

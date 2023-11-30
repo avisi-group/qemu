@@ -1,6 +1,5 @@
 use {
     color_eyre::eyre::Result,
-    memmap2::Mmap,
     parking_lot::RwLock,
     scribe::hardware::{
         notify::Notify, ordered_queue, reader::TaskManager, writer::Writer, TipParser, TipWriter,
@@ -8,7 +7,7 @@ use {
     std::{
         env::args,
         fs::File,
-        path::{Path, PathBuf},
+        path::PathBuf,
         process::exit,
         sync::{atomic::AtomicU32, Arc},
     },
@@ -27,8 +26,10 @@ fn main() -> Result<()> {
     };
 
     let path = PathBuf::from(arg);
+    let file = File::open(&path)?;
 
-    let raw = open_path(&path)?;
+    let raw = unsafe { memmap2::MmapOptions::new().map(&file) }?;
+
     let pc_map = Arc::new(RwLock::new(
         serde_json::from_reader(File::open("/tmp/pt/pcmap.json").unwrap()).unwrap(),
     ));
@@ -45,10 +46,12 @@ fn main() -> Result<()> {
         task_count.clone(),
     );
 
-    let mut task_manager = TaskManager::<TipParser>::new(sender, task_count);
+    let mut task_manager = TaskManager::<TipParser>::new(sender, task_count.clone());
     let mut current_index = 0;
 
     loop {
+        empty_buffer_notifier.wait();
+
         let consumed = task_manager.callback(false)(&raw[current_index..]);
 
         if consumed == 0 {
@@ -64,8 +67,4 @@ fn main() -> Result<()> {
     writer.exit();
 
     Ok(())
-}
-
-fn open_path<P: AsRef<Path>>(path: P) -> Result<Mmap> {
-    Ok(unsafe { memmap2::MmapOptions::new().map(&File::open(path)?) }?)
 }
